@@ -1,0 +1,10 @@
+pytest
+pytest-cov
+ruff
+black
+mypy
+jupyter
+ipykernel
+streamlit
+fastapi
+uvicorn

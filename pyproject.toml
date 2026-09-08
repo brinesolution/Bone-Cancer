@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bone-cancer-ai"
+version = "0.1.0"
+description = "Modular bone-tumour radiograph research pipeline"
+readme = "README.md"
+requires-python = ">=3.11,<3.12"
+dynamic = ["dependencies"]
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements/base.txt"]}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--strict-markers --basetemp=logs/pytest_tmp"
+markers = ["cuda: requires CUDA and performs only synthetic tensor verification"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+extend-exclude = ["dataset", ".venv", "workspace", "logs", "notebooks"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]

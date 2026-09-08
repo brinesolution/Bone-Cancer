@@ -1,0 +1,17 @@
+status: unverified
+binary:
+  enabled: false
+  classes: {}
+  semantics_verified: false
+subtype:
+  enabled: false
+  classes: []
+risk:
+  enabled: false
+  classes: []
+concepts:
+  enabled: false
+  names: []
+localization:
+  boxes_verified: false
+  masks_verified: false

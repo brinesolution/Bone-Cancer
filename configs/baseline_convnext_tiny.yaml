@@ -1,0 +1,9 @@
+status: pending_phase_5
+train_config: train.yaml
+data_config: data.yaml
+model:
+  family: baseline
+  name: convnext_tiny
+  pretrained: true
+  num_classes: null
+labels_verified: false

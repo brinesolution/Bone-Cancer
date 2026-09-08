@@ -1,0 +1,22 @@
+project_root: "E:/Bone Cancer"
+dataset_root: "E:/Bone Cancer/dataset/Main"
+source_read_only: true
+workspace_root: workspace
+artifacts_root: artifacts
+logs_root: logs
+schema_path: workspace/annotations/label_schema.yaml
+official_splits: [train, val, test]
+image_extensions: [.jpg, .jpeg, .png]
+image_size: 384
+seed: 42
+labels_verified: false
+preprocessing:
+  preserve_aspect_ratio: true
+  pad_to_square: true
+  channels: 3
+  percentile_clipping: false
+augmentation:
+  horizontal_flip: false
+  vertical_flip: false
+  rotation_limit: 7
+  clahe: false

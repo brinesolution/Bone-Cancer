@@ -1,0 +1,16 @@
+torch==2.14.0+cu130
+torchvision==0.29.0+cu130
+timm
+monai
+albumentations
+torchmetrics
+segmentation-models-pytorch
+pydicom
+SimpleITK
+matplotlib
+plotly
+tensorboard
+mlflow
+optuna
+grad-cam
+shap

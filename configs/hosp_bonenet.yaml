@@ -1,0 +1,21 @@
+status: pending_phase_6
+train_config: train.yaml
+data_config: data.yaml
+model:
+  name: hosp_bonenet
+  backbone: convnext_tiny
+  pretrained: true
+  num_binary_classes: null
+  pooling: adaptive_avg
+  localization: true
+  subtype_enabled: false
+  risk_enabled: false
+  concepts_enabled: false
+loss_weights:
+  binary: 1.0
+  subtype: 0.0
+  segmentation: 0.0
+  concepts: 0.0
+  grounding: 0.0
+  hierarchy: 0.0
+labels_verified: false

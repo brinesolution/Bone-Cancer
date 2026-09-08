@@ -1,0 +1,8 @@
+status: pending_phase_10
+data_config: data.yaml
+model_config: hosp_bonenet.yaml
+checkpoint: null
+device: cuda
+binary_threshold: null
+open_set_threshold: null
+conformal_calibration: null
