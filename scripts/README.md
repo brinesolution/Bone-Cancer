@@ -4,25 +4,25 @@
 Phase command entry points.
 
 ## Files
-00_verify_environment.py: active verifier; 01–03: Phase 2 audit; 04–06: Phase 3 preparation; 07–08: Phase 4 annotations; 09: Phase 5 baseline; 10: Phase 7 training; 11: Phase 8 tuning; 12–14: Phase 9 evaluation/explanations; 15: inference; run_phase.ps1: Phase 1 commands.
+`00_verify_environment.py` verifies the environment. `01_index_dataset.py` builds master/quality/label-structure records; `02_audit_dataset.py` validates provenance and renders figures; `03_find_duplicates.py` builds duplicate/leakage groups. Scripts 04–15 remain phase-gated scaffolds. `run_phase.ps1` exposes common checks and the ordered Phase 2 audit.
 
 ## Inputs
-Configuration and installed package; later phases need verified artifacts.
+Configuration, installed package, immutable source data, and Phase 2 manifests in stage order.
 
 ## Outputs
-Verifier JSON on stdout; diagnostics on stderr; --output writes a new safe report exclusively.
+JSON summaries on stdout, generated CSV/PNG/JSON evidence in workspace/artifacts/logs, and nonzero status for unsafe paths or structural label/semantic failures.
 
 ## Main Libraries
-argparse/json and package utils.
+argparse, pathlib, Pandas and reusable package audit modules.
 
 ## Important Functions / Classes
-main validates paths before imports/output. run_phase.ps1 propagates command exit codes.
+Each `main` validates output paths before writes. Script 01 contains per-image decode failures; script 02 requires verified binary semantics; script 03 reports leakage but does not fail merely because candidates exist. `run_phase.ps1` stops the sequence after a failed stage.
 
 ## Theory
-Inactive commands fail explicitly rather than claiming results.
+Thin scripts keep data logic reusable and atomic writers prevent partial derived tables. Leakage findings are evidence for Phase 3 rather than source mutations.
 
 ## Execution
-python scripts/00_verify_environment.py --require-cuda; ./scripts/run_phase.ps1 -Action test
+`./scripts/run_phase.ps1 -Action phase2`, or run scripts 01, 02 and 03 in order. Use `-Action test`, `lint` and `compile` for checks.
 
 ## Notes
-Do not edit generated records manually. Keep original dataset files untouched. Future-phase scaffolds are not completed functionality; update this README when implementation becomes active.
+Never reorder the Phase 2 stages because audit/dedupe consume the master. Do not edit Main or start training from official folders before Phase 3 produces clean manifests.

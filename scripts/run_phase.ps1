@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('verify', 'test', 'lint', 'compile')]
+    [ValidateSet('verify', 'test', 'lint', 'compile', 'phase2')]
     [string]$Action = 'verify'
 )
 
@@ -11,13 +11,29 @@ if (-not (Test-Path -LiteralPath $projectPython)) {
 }
 Push-Location -LiteralPath $projectRoot
 try {
-    switch ($Action) {
-        'verify' { & $projectPython 'scripts/00_verify_environment.py' --require-cuda }
-        'test' { & $projectPython -m pytest -q }
-        'lint' { & $projectPython -m ruff check . }
-        'compile' { & $projectPython -m compileall -q src scripts app tools }
+    if ($Action -eq 'phase2') {
+        $resultCode = 0
+        foreach ($script in @(
+            'scripts/01_index_dataset.py',
+            'scripts/02_audit_dataset.py',
+            'scripts/03_find_duplicates.py'
+        )) {
+            & $projectPython $script
+            $resultCode = $LASTEXITCODE
+            if ($resultCode -ne 0) {
+                break
+            }
+        }
     }
-    $resultCode = $LASTEXITCODE
+    else {
+        switch ($Action) {
+            'verify' { & $projectPython 'scripts/00_verify_environment.py' --require-cuda }
+            'test' { & $projectPython -m pytest -q }
+            'lint' { & $projectPython -m ruff check . }
+            'compile' { & $projectPython -m compileall -q src scripts app tools }
+        }
+        $resultCode = $LASTEXITCODE
+    }
 }
 finally {
     Pop-Location

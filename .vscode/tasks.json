@@ -59,6 +59,28 @@
         "cwd": "${workspaceFolder}"
       },
       "problemMatcher": []
+    },
+    {
+      "label": "Run Phase 2 audit",
+      "type": "shell",
+      "command": "${workspaceFolder}/scripts/run_phase.ps1",
+      "args": [
+        "-Action",
+        "phase2"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "shell": {
+          "executable": "powershell.exe",
+          "args": [
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command"
+          ]
+        }
+      },
+      "problemMatcher": []
     }
   ]
 }

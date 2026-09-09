@@ -10,19 +10,19 @@ checkpoints/: learned weights; metrics/: real metrics; predictions/: outputs; fi
 Future completed runs and frozen evaluation config.
 
 ## Outputs
-No model artifacts or fabricated metrics.
+Phase 2 dataset audit figures exist under `figures/`. No model artifacts or performance metrics exist.
 
 ## Main Libraries
-None in Phase 1.
+Matplotlib/Pillow for current audit figures; later producers remain pending.
 
 ## Important Functions / Classes
-Output producers are implemented in later phases.
+`save_audit_figures` is active. Model/evaluation producers are implemented in later phases.
 
 ## Theory
 Artifact claims must be backed by executed code.
 
 ## Execution
-Pending relevant phases.
+`python scripts/02_audit_dataset.py` for Phase 2 figures.
 
 ## Notes
-Do not edit generated records manually. Keep original dataset files untouched. Future-phase scaffolds are not completed functionality; update this README when implementation becomes active.
+Do not edit generated artifacts manually or add fabricated results. Regenerate artifacts from recorded inputs/configs.

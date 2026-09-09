@@ -1,17 +1,53 @@
-status: unverified
+status: phase_2_audited
 binary:
-  enabled: false
-  classes: {}
-  semantics_verified: false
+  enabled: true
+  classes:
+    0: normal
+    1: bone_tumour
+  semantics_verified: true
+  evidence_coverage_images: 12557
+  source_label_integrity: requires_duplicate_aware_clean_manifest
+  duplicate_pair_label_conflicts: 6
+  exact_duplicate_pair_label_conflicts: 2
 subtype:
   enabled: false
-  classes: []
+  available: true
+  activation_gate: phase_4_annotation_validation
+  labeled_images: 1866
+  classes:
+    - giant cell tumor
+    - multiple osteochondromas
+    - osteochondroma
+    - osteofibroma
+    - osteosarcoma
+    - other bt
+    - other mt
+    - simple bone cyst
+    - synovial osteochondroma
+  provenance: BTXRD workbook and subtype detection export
+  source_conflicts: 1
 risk:
   enabled: false
-  classes: []
+  available: true
+  activation_gate: phase_4_annotation_validation
+  labeled_images: 1867
+  classes:
+    - benign
+    - malignant
+  provenance: BTXRD workbook and three-class folders
 concepts:
   enabled: false
+  available: false
   names: []
 localization:
+  available: true
+  source_images_with_boxes: 1867
+  source_images_with_polygons: 1867
   boxes_verified: false
   masks_verified: false
+  activation_gate: phase_4 spatial conversion and overlay validation
+notes:
+  - Binary names describe the source label schema, not clinical verification of each image.
+  - Ten nonexact detection-export rows are excluded from direct evidence consumption.
+  - Subtype, risk, and spatial branches remain disabled pending Phase 4 validation.
+  - No patient or study identifier is available for grouping.

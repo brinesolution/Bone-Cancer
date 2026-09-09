@@ -4,25 +4,25 @@
 Audit/evaluation figures.
 
 ## Files
-README.md: folder contract; no produced files yet.
+`dataset_class_distribution.png`, `dimension_distribution.png` and `sample_grid.png` are Phase 2 audit figures. Later evaluation figures remain pending.
 
 ## Inputs
-Verified inputs from the owning phase.
+Audited `dataset_master.csv`.
 
 ## Outputs
-No outputs yet.
+Executed class-count, stored-dimension and deterministic source-preview figures.
 
 ## Main Libraries
-None in Phase 1.
+Matplotlib, Pillow and NumPy.
 
 ## Important Functions / Classes
-No functions in this output folder; parent README identifies producers.
+`save_audit_figures` in `data/audit.py` owns these files.
 
 ## Theory
-Pending real data audit or evaluation; no fabricated plots.
+Plots summarize executed audit rows. The sample grid withholds manifest IDs but keeps source pixels unchanged, so burned-in text may remain visible and must be treated as a leakage/privacy risk.
 
 ## Execution
-Pending owning phase; see parent README.
+`python scripts/02_audit_dataset.py` regenerates all three figures.
 
 ## Notes
-Do not edit generated records manually. Keep original dataset files untouched. Future-phase scaffolds are not completed functionality; update this README when implementation becomes active.
+Do not edit generated figures manually or present them as clinical review. Inspect stored orientation, exposure, text markers and capture artifacts before Phase 3 preprocessing decisions.

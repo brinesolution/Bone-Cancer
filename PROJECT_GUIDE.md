@@ -1,6 +1,6 @@
 # Project guide
 
-Phase 1 is verified: 31 tests, dependency/CUDA checks and source-preservation comparison passed. Future-phase descriptions below are the approved design, not completed functionality.
+Phases 1 and 2 establish the environment and audited data inventory. The audit executed against every Main image; Phase 3 and later descriptions below remain approved design rather than completed functionality.
 
 ## 1. Project Overview
 
@@ -8,11 +8,13 @@ HOSP-BoneNet is the single proposed model. Ten acceptance-gated phases build thi
 
 ## 2. Problem Definition
 
-Input: a musculoskeletal radiograph. Minimum prediction: binary classification under a verified schema. Subtype, risk, concepts and supervised localization require actual labels. This is a research prototype, not autonomous clinical diagnosis.
+Input: a musculoskeletal radiograph. The verified source schema defines 0=`normal` and 1=`bone_tumour`. These are dataset meanings, not a clinical finding independently confirmed for every image. Partial subtype/risk/spatial metadata needs validity masks and Phase 4 validation. This is a research prototype, not autonomous clinical diagnosis.
 
 ## 3. What the Dataset Contains
 
-Filesystem inventory: train has 8,789 JPG/JPEG files and one CSV; val and test each have 1,884 JPG/JPEG files and one CSV. These are file counts, not validated image/label counts. Semantics, row matching, quality and grouping remain Pending Phase 2. Other dataset directories include BTXRD and exported archives; do not assume they share semantics or merge them without the audit.
+The audited Main dataset contains 12,557 labeled images: train 8,789, validation 1,884 and test 1,884. Class 0 (`normal`) has 6,827 images and class 1 (`bone_tumour`) has 5,730. All label rows map to files and all files decode. Stored formats are 8,838 `.jpg` plus 3,719 `.jpeg`; 2,895 decode as grayscale and 9,662 as RGB, of which 9,109 have effectively identical channels. Resolution varies widely. Two low-exposure images are conservatively flagged `near_blank` but retain visible anatomy.
+
+Separate local metadata maps one-to-one by canonical source ID across all Main records and establishes the binary names without parsing diagnostic filename words. Every Main canonical group has an exact source-image SHA-256 anchor. BTXRD supplies benign/malignant risk metadata for 1,867 tumour images and unambiguous subtype metadata for 1,866. It also has 1,867 images with box and polygon source annotations. One workbook row activates two subtype columns; its subtype remains blank and the conflict is explicitly reported.
 
 ## 4. Folder Structure
 
@@ -24,11 +26,13 @@ See requirements/README.md for commands and official sources. Python 3.11.15 is 
 
 ## 6. Data Audit
 
-Pending Phase 2. Index every image, map every label row, report missing/extra records, decode failures, dimensions, modes and class counts. Verify 0/1 meanings from authoritative source documentation. Phase 1 hashes establish immutability; they do not constitute the image audit or duplicate report.
+Scripts 01–03 index, validate and group the dataset. `dataset_master.csv` includes stable record/canonical IDs, original absolute paths, split, dimensions, channels, byte/perceptual hashes, labels, partial-supervision flags and pixel-quality measurements. `quality_report.csv` isolates review fields, while `label_audit.csv` retains structural/provenance issues. No source image is altered, normalized or recompressed. Empty labels remain empty rather than guessed.
 
 ## 7. Duplicate and Leakage Prevention
 
-Pending Phase 2/3. Compare SHA-256, perceptual hashes and canonical source IDs, including augmentation copies. Correct splits through manifests without moving files. Keep each duplicate/source/patient group in one fit/calibration/val/test partition. Patient independence requires reliable patient identifiers.
+Phase 2 found 2,045 connected duplicate candidate groups covering 6,968 images and 13,225 pair edges. Of those, 6,112 edges cross official splits, including 508 exact-byte cross-split edges. Evidence includes 1,080 SHA-256 matches, 11,016 canonical-ID matches and 4,300 pHash-distance candidates; an edge may contain more than one evidence type. Six candidate pairs have binary-label conflicts, including two exact-byte conflicts. Perceptual matches remain review candidates and are not automatically deleted.
+
+Phase 3 must produce corrected manifest-only fit/calibration/validation/test assignments and keep every connected group in one partition. Source folders stay untouched. No patient or study ID column exists, so canonical/duplicate grouping is the strongest available independence control; this limitation must remain visible in evaluation claims.
 
 ## 8. Preprocessing
 
@@ -36,15 +40,15 @@ Pending Phase 3. Decode safely, remove alpha, consistently form three channels, 
 
 ## 9. Data Augmentation
 
-Pending Phase 3. Mild rotations (up to 7 degrees), translation and intensity changes are intended. Horizontal and vertical flips are disabled. Severe geometry/color changes are unsuitable defaults. CLAHE is a validated ablation only.
+Pending Phase 3. Mild rotations (up to 7 degrees), translation and intensity changes are intended. Horizontal and vertical flips are disabled. Audit previews show mixed stored orientation, photographic film captures and burned-in text/markers, so Phase 3 must test orientation handling and prevent text/background shortcuts. Severe geometry/color changes are unsuitable defaults. CLAHE is a validated ablation only.
 
 ## 10. Annotation Workflow
 
-Pending Phase 4. Record image ID, labels including unknown, reviewer, timestamp, notes and revisions. Use reliable spatial tooling for boxes/masks and verify alignment and reload/edit/export. Project annotations are not radiologist/pathology ground truth without real verification.
+Pending Phase 4. Existing BTXRD boxes/polygons and subtype/risk metadata are available for 1,867 images but remain disabled until coordinate conversion, overlays and source conflicts are validated. Record image ID, labels including unknown, reviewer, timestamp, notes and revisions. Project annotations are not radiologist/pathology ground truth without real verification.
 
 ## 11. DataLoader Design
 
-Pending Phase 3. Load manifest-approved images and return tensors, labels, validity masks and separate metadata. Filenames never enter predictive tensors. Mask missing labels and align image/lesion transforms. Windows workers start at zero until multiprocessing is validated.
+Pending Phase 3. Load only manifest-approved images and return tensors, labels, validity masks and separate metadata. Filenames and source paths never enter predictive tensors. Mask the 10,690 records without subtype/risk/spatial supervision and align image/lesion transforms. Windows workers start at zero until multiprocessing is validated.
 
 ## 12. Baseline Models
 
@@ -116,12 +120,12 @@ Pending Phase 10. Upload, validate, predict, show calibrated confidence/abstenti
 
 ## 29. How to Run Each Phase
 
-Phase 1: `python scripts/00_verify_environment.py`, `pytest -q`, `ruff check .`, `python -m compileall -q src scripts app tools`. PowerShell: `./scripts/run_phase.ps1 -Action verify` or `-Action test`. Later commands are in master directive Section 22 and remain inactive. Stop after Phase 1 and manually select SOL for Phase 2.
+Phase 1 environment: `python scripts/00_verify_environment.py`. Phase 2 data audit: run `python scripts/01_index_dataset.py`, `python scripts/02_audit_dataset.py`, and `python scripts/03_find_duplicates.py` in that order, or `./scripts/run_phase.ps1 -Action phase2`. Validation: `pytest -q`, `ruff check .`, and `python -m compileall -q src scripts app tools`. Scripts 04–15 remain inactive until their phases.
 
 ## 30. Common Errors and Troubleshooting
 
-For initial creation when `py -3.11` cannot resolve uv Python, use `uv venv --python 3.11 --seed .venv`. On import failure, activate .venv and install editable. On CUDA failure, record nvidia-smi and torch.version.cuda; do not start CPU training. Configs must be mappings without duplicate keys. Output paths cannot escape the project or overlap source data. Deterministic settings do not promise bitwise portability across hardware/software.
+For initial creation when `py -3.11` cannot resolve uv Python, use `uv venv --python 3.11 --seed .venv`. On import failure, activate .venv and install editable. Configs must be mappings without duplicate keys, and outputs cannot overlap source data. A script-01 structural error means inspect `label_audit.csv`; do not weaken validation. Script 02 exits 2 when binary semantics cannot be established. Duplicate counts are not a script error because Phase 3 owns exclusions/split repair. Two `near_blank` results are review flags, not automatic exclusions. Deterministic settings do not promise bitwise portability across hardware/software.
 
 ## 31. Team Review Study Notes
 
-Member 1: data and leakage. Member 2: annotation/localization. Member 3: baselines/training. Member 4: HOSP-BoneNet/optimization. Study folder READMEs before changing interfaces. Installed libraries do not establish implemented features. Phase 1 uses pathlib/hashlib/logging, PyYAML, NumPy and torch utilities. Other packages are import-verified infrastructure for later phases; document actual APIs as they become used.
+Member 1: study manifest contracts, SHA/pHash/canonical evidence and Phase 3 grouping. Member 2: study the BTXRD workbook, the one subtype conflict and Phase 4 spatial validation. Member 3: keep all baselines on the same future clean manifest. Member 4: keep HOSP-BoneNet optional heads masked/disabled according to coverage. Phase 2 uses pathlib/hashlib, Pillow, ImageHash, NumPy, Pandas, Matplotlib, PyYAML and openpyxl. Audit figures show data properties only; no model metric, radiologist review or clinical verification has been produced.

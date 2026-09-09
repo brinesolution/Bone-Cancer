@@ -4,10 +4,10 @@
 Local execution evidence.
 
 ## Files
-source_before_phase1.json: initial file hashes/sizes/mtimes; source_after_phase1.json: final comparison snapshot when verified; environment_phase1.json: verifier report; install_*.log/txt: dependency output; phase1_*.txt: tests/checks; .gitkeep: folder marker.
+Phase 1 environment/source evidence is retained. `dataset_index_summary.json`, `dataset_audit_summary.json`, `duplicate_summary.json` and `phase2_*.txt` record Phase 2 execution; `source_after_phase2.json` records the final immutability comparison.
 
 ## Inputs
-Executed installation, tests, environment and integrity checks.
+Executed installation, tests, environment, dataset audit and integrity checks.
 
 ## Outputs
 Local logs; sensitive source paths remain ignored by Git.
@@ -16,13 +16,13 @@ Local logs; sensitive source paths remain ignored by Git.
 Python logging/json/hashlib; pytest command output.
 
 ## Important Functions / Classes
-snapshot_source reads originals; configure_logging emits JSON lines.
+`snapshot_source` reads originals; `configure_logging` emits JSON lines; the three Phase 2 CLIs atomically write summaries.
 
 ## Theory
 Recorded commands and hashes distinguish executed evidence from intended behavior.
 
 ## Execution
-python scripts/00_verify_environment.py --require-cuda --output logs/environment_new.json
+Run the owning CLI; use `python scripts/00_verify_environment.py --require-cuda --output logs/environment_new.json` only for a new environment report path.
 
 ## Notes
-Do not edit generated records manually. Keep original dataset files untouched. Future-phase scaffolds are not completed functionality; update this README when implementation becomes active.
+Do not edit evidence manually or overwrite Phase 1 baselines. Logs contain local absolute paths and remain Git-ignored.

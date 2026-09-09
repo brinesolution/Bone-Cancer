@@ -9,7 +9,25 @@ official_splits: [train, val, test]
 image_extensions: [.jpg, .jpeg, .png]
 image_size: 384
 seed: 42
-labels_verified: false
+labels_verified: true
+audit:
+  workers: 8
+  phash_distance: 4
+  sample_grid_size: 16
+  quality:
+    thumbnail_size: 256
+    rgb_grayscale_tolerance: 1
+    blank_std_threshold: 0.5
+    near_blank_std_threshold: 3.0
+    blank_entropy_threshold: 0.1
+    near_blank_entropy_threshold: 1.0
+    dark_pixel_threshold: 5
+    bright_pixel_threshold: 250
+provenance:
+  roboflow_binary_root: dataset/bone cancer detection.v1i.folder
+  three_class_root: dataset/archive(2)/bone-tumor-dataset
+  btxrd_root: dataset/BTXRD
+  subtype_detection_root: dataset/archive(3)
 preprocessing:
   preserve_aspect_ratio: true
   pad_to_square: true
