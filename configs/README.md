@@ -4,10 +4,10 @@
 Configuration contracts.
 
 ## Files
-`data.yaml` contains immutable source paths, provenance roots, image extensions, audit thresholds and preprocessing defaults. `train.yaml`, `baseline_*.yaml`, `hosp_bonenet.yaml` and `inference.yaml` remain later-phase contracts.
+`data.yaml` contains immutable source paths, provenance roots, image/audit settings, clean-split policy, preprocessing, conservative augmentation and DataLoader defaults. `train.yaml`, `baseline_*.yaml`, `hosp_bonenet.yaml` and `inference.yaml` remain later-phase contracts.
 
 ## Inputs
-Approved directive and Phase 2 verified label meanings.
+Approved directive, Phase 2 verified label meanings/duplicate evidence, and Phase 3 safety decisions.
 
 ## Outputs
 Explicit YAML mappings consumed by the package.
@@ -19,10 +19,10 @@ PyYAML via utils.config.
 `load_config` rejects duplicate keys/non-mappings. `ProjectPaths` resolves the project and blocks outputs that overlap `dataset/Main`. Referenced `*_config` paths are relative to this folder; config inheritance is not implemented.
 
 ## Theory
-Audit parameters control the deterministic pHash distance and conservative blank-image screen. Binary semantics are verified; model-training configs remain gated until cleaned splits exist.
+Audit parameters control pHash/quality screening. The Phase 3 policy gives test then validation then train retention priority for connected groups, excludes exact-byte conflicts, retains pHash-only conflicts for review, and reserves 15% of clean official training for grouped calibration. Preprocessing uses grayscale-replicated RGB, aspect padding to 384 and ImageNet normalization. Training transforms prohibit flips/crops.
 
 ## Execution
-`python scripts/01_index_dataset.py --config configs/data.yaml` followed by scripts 02 and 03.
+Run scripts 01–04 and 06 with `--config configs/data.yaml`; script 05 is optional.
 
 ## Notes
-Change thresholds only through reviewed configuration and rerun all three audit stages. Never point outputs into the source dataset.
+Policy action names are validated and unsupported silent-relabel behavior fails. After a reviewed change, rerun every affected upstream/downstream stage. Never point outputs into the source dataset.

@@ -4,25 +4,25 @@
 Phase-scoped behavioral tests.
 
 ## Files
-test_utils.py: YAML, paths, RNG, logging, hashes; test_environment.py: installed CLI, CUDA and inactive training entry points; remaining test_*.py: future-phase docstring shells.
+`test_utils.py`: YAML, paths, RNG, logging and hashes; `test_environment.py`: installed CLI/CUDA/inactive later entry points; `test_dataset.py` and `test_dedupe.py`: Phase 2 audit; `test_splits.py`: Phase 3 cleaning/group partition rules; `test_transforms.py`: preprocessing, partial-label Dataset, DataModule, cache and visual-grid contracts.
 
 ## Inputs
-Synthetic temporary files/tensors and installed environment.
+Synthetic temporary files/tensors, subprocess CLIs, and the installed environment. Tests do not alter the real source dataset.
 
 ## Outputs
-pytest results; temporary data under logs/pytest_tmp.
+pytest results; disposable outputs under `logs/pytest_tmp`.
 
 ## Main Libraries
-pytest, NumPy, torch, subprocess.
+pytest, NumPy, Pandas, Pillow, OpenCV, Albumentations, scikit-learn, torch and subprocess.
 
 ## Important Functions / Classes
-Tests never train models. CUDA checks use tiny synthetic tensors.
+Phase 3 tests cover deterministic validation, seeded training transforms, no flips/crops, image/mask alignment, malformed/missing labels, opaque batches, corrupt decode containment, group overlap and deterministic optional caching. Tests never train models.
 
 ## Theory
-Tests must fail for broken behavior, not simply check that files exist.
+Synthetic geometric supports check transform alignment; invariant tests establish that connected groups occupy one final split and held-out records never enter fit/calibration.
 
 ## Execution
-pytest -q
+`python -m pytest -q`; focused: `python -m pytest tests/test_splits.py tests/test_transforms.py -q`.
 
 ## Notes
-Do not edit generated records manually. Keep original dataset files untouched. Future-phase scaffolds are not completed functionality; update this README when implementation becomes active.
+Keep tests independent of private source filenames and never lower leakage/label safety assertions to pass a run.

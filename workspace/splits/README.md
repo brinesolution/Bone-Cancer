@@ -4,25 +4,25 @@
 Manifest-based partitions.
 
 ## Files
-fit_train.csv, calibration.csv, val.csv, test.csv: header-only split scaffolds.
+`fit_train.csv`, `calibration.csv`, `val.csv`, and `test.csv`: self-contained eligible record manifests.
 
 ## Inputs
-Future audited source/duplicate groups.
+Phase 3 `dataset_clean.csv`, duplicate-group IDs, verified binary labels, and the configured seed/calibration fraction.
 
 ## Outputs
-No assigned records yet.
+Executed counts are fit 4,871, calibration 857, validation 1,453, and test 1,882. Every one of the 9,063 eligible records occurs exactly once.
 
 ## Main Libraries
-None in Phase 1.
+Pandas and scikit-learn `GroupShuffleSplit` through `data/samplers.py`.
 
 ## Important Functions / Classes
-Future split builder assigns groups without moving images.
+`assign_internal_splits` searches seeded group-respecting training candidates; `validate_final_splits` rejects overlap, missing assignments, and held-out-to-training movement. `split_generation_id` fingerprints every persisted field except itself. `BoneCancerDataModule` jointly validates all four files and refuses mixed/stale generations or paths outside `dataset/Main`.
 
 ## Theory
-Calibration is held out from official training after duplicate grouping; test never tunes models.
+Calibration is held out from clean official training after duplicate grouping. Official validation/test semantics are preserved, except lower-priority duplicate copies are excluded to stop leakage. Test labels never select calibration assignments or model decisions.
 
 ## Execution
-Pending Phase 3.
+`python scripts/06_make_internal_splits.py` or `./scripts/run_phase.ps1 -Action phase3`.
 
 ## Notes
-Do not edit generated records manually. Keep original dataset files untouched. Future-phase scaffolds are not completed functionality; update this README when implementation becomes active.
+Do not edit generated records manually or train from the official folders. Regenerate after any upstream audit/policy change. No patient/study identifier exists, so duplicate connected groups are the strongest available grouping unit.

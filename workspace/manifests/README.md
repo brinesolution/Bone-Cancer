@@ -4,25 +4,25 @@
 Dataset audit tables.
 
 ## Files
-dataset_master.csv: image index; duplicate_groups.csv: grouping; quality_report.csv: quality findings; label_audit.csv: row/label issues.
+`dataset_master.csv`: image index; `duplicate_groups.csv`: pair/group evidence; `quality_report.csv`: quality findings; `label_audit.csv`: row/label issues; `dataset_clean.csv`: all source records plus Phase 3 eligibility/assignment fields; `exclusions.csv`: excluded rows and reasons.
 
 ## Inputs
-Immutable Main images, three source CSVs and configured provenance metadata.
+Immutable Main images/CSVs, configured provenance metadata and Phase 3 split policy.
 
 ## Outputs
-`dataset_master.csv` and `quality_report.csv` contain 12,557 rows. `label_audit.csv` retains one source metadata conflict. `duplicate_groups.csv` is a pair-edge report with stable connected-component IDs, evidence types, split flags and label conflicts.
+`dataset_master.csv`, `quality_report.csv`, and `dataset_clean.csv` contain 12,557 rows. The clean manifest marks 9,063 eligible and 3,494 excluded records; `exclusions.csv` holds those 3,494 decisions. `duplicate_groups.csv` is a pair-edge report with stable connected-component IDs, evidence types, split flags and label conflicts.
 
 ## Main Libraries
-Pandas, Pillow, ImageHash and NumPy.
+Pandas, Pillow, ImageHash and NumPy; Phase 3 policy code uses stable SHA-derived opaque IDs.
 
 ## Important Functions / Classes
-`index_dataset` owns master/quality rows; `audit_labels` enriches verified labels; `find_duplicate_edges` and `build_duplicate_groups` own duplicate evidence.
+`index_dataset` owns master/quality rows; `audit_labels` enriches verified labels; `find_duplicate_edges` and `build_duplicate_groups` own duplicate evidence; `build_clean_manifest` adds eligibility, review, group and clean-pool fields without changing the source.
 
 ## Theory
-SHA-256 confirms identical bytes. Canonical IDs connect exported variants. A 64-bit perceptual hash supplies review candidates under the configured Hamming distance. Connected groups must stay within one final split to prevent leakage.
+SHA-256 confirms identical bytes. Canonical IDs connect exported variants. A 64-bit perceptual hash supplies review candidates. Phase 3 retains records from the highest-priority official split in each connected group and excludes lower-priority copies. Exact-byte label-conflict groups are excluded; pHash-only conflicts stay grouped and flagged.
 
 ## Execution
-`python scripts/01_index_dataset.py`; `python scripts/02_audit_dataset.py`; `python scripts/03_find_duplicates.py`.
+Run scripts 01–03, then `python scripts/04_build_clean_manifest.py`.
 
 ## Notes
-Do not edit these generated CSVs manually. Perceptual matches are candidates, while exact hashes are confirmed byte duplicates. Phase 3 must create a clean manifest and resolve label conflicts without moving source files.
+Do not edit these generated CSVs manually. Regenerate them from the scripts. Source paths are audit metadata and must never be model inputs.

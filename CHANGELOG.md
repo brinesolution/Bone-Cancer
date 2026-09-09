@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-09-09 — Phase 3 verified
+
+- Added an all-record clean manifest with opaque sample/group IDs, explicit exclusions/review flags, and held-out priority that never moves validation/test records into training.
+- Logged 3,490 lower-priority cross-split duplicate exclusions and four records from two exact-byte label-conflict groups; kept pHash-only conflicts together for review.
+- Created deterministic connected-group partitions: fit 4,871; calibration 857; validation 1,453; test 1,882.
+- Added a full-bundle generation fingerprint and fail-closed DataModule checks for stale/mixed files, record/sample/group overlap, eligibility, held-out movement and paths outside `dataset/Main`.
+- Implemented safe grayscale/RGB/RGBA decoding, aspect-preserving 384-pixel padding, aligned masks, deterministic evaluation transforms and conservative fit-only augmentation without flips/crops.
+- Implemented partial-label Dataset/DataModule contracts, corrupt-runtime invalid samples, seeded shuffle/weighted sampling and no source filename/path predictive fields.
+- Added an optional traceable image cache; verified 16 opaque PNGs with matching hashes and no source edits.
+- Loaded real batches from every split and visually verified recognizable anatomy, grayscale consistency and expected padding.
+- Preserved the exact source snapshot: 12,560 files and 1,120,418,007 bytes unchanged. No model training or performance results were produced.
+
 ## 2026-09-09 — Phase 2 verified
 
 - Indexed all 12,557 Main images and mapped every label row without modifying source files.

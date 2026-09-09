@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('verify', 'test', 'lint', 'compile', 'phase2')]
+    [ValidateSet('verify', 'test', 'lint', 'compile', 'phase2', 'phase3')]
     [string]$Action = 'verify'
 )
 
@@ -11,13 +11,22 @@ if (-not (Test-Path -LiteralPath $projectPython)) {
 }
 Push-Location -LiteralPath $projectRoot
 try {
-    if ($Action -eq 'phase2') {
+    if ($Action -in @('phase2', 'phase3')) {
         $resultCode = 0
-        foreach ($script in @(
-            'scripts/01_index_dataset.py',
-            'scripts/02_audit_dataset.py',
-            'scripts/03_find_duplicates.py'
-        )) {
+        $phaseScripts = if ($Action -eq 'phase2') {
+            @(
+                'scripts/01_index_dataset.py',
+                'scripts/02_audit_dataset.py',
+                'scripts/03_find_duplicates.py'
+            )
+        }
+        else {
+            @(
+                'scripts/04_build_clean_manifest.py',
+                'scripts/06_make_internal_splits.py'
+            )
+        }
+        foreach ($script in $phaseScripts) {
             & $projectPython $script
             $resultCode = $LASTEXITCODE
             if ($resultCode -ne 0) {

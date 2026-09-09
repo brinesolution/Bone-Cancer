@@ -1,6 +1,6 @@
 # Project guide
 
-Phases 1 and 2 establish the environment and audited data inventory. The audit executed against every Main image; Phase 3 and later descriptions below remain approved design rather than completed functionality.
+Phases 1–3 establish the environment, audited data inventory, leakage-controlled manifests and deterministic DataLoaders. The audit executed against every Main image; Phase 4 and later descriptions remain approved design rather than completed functionality.
 
 ## 1. Project Overview
 
@@ -32,15 +32,15 @@ Scripts 01–03 index, validate and group the dataset. `dataset_master.csv` incl
 
 Phase 2 found 2,045 connected duplicate candidate groups covering 6,968 images and 13,225 pair edges. Of those, 6,112 edges cross official splits, including 508 exact-byte cross-split edges. Evidence includes 1,080 SHA-256 matches, 11,016 canonical-ID matches and 4,300 pHash-distance candidates; an edge may contain more than one evidence type. Six candidate pairs have binary-label conflicts, including two exact-byte conflicts. Perceptual matches remain review candidates and are not automatically deleted.
 
-Phase 3 must produce corrected manifest-only fit/calibration/validation/test assignments and keep every connected group in one partition. Source folders stay untouched. No patient or study ID column exists, so canonical/duplicate grouping is the strongest available independence control; this limitation must remain visible in evaluation claims.
+Phase 3 produced corrected manifest-only fit/calibration/validation/test assignments and keeps every connected group in one partition. Source folders remain untouched. For a group crossing official splits, records in test have retention priority, then validation, then train; 3,490 lower-priority copies are excluded. Four records across two exact-byte label-conflict groups are also excluded. Three pHash-only conflict groups remain together and flag 37 records for Phase 4 review. No patient or study ID exists, so duplicate grouping is the strongest available independence control; this limitation must remain visible in evaluation claims.
 
 ## 8. Preprocessing
 
-Pending Phase 3. Decode safely, remove alpha, consistently form three channels, preserve aspect ratio, pad square, resize to configured 384 pixels and normalize for pretrained encoders. Percentile clipping needs validation. Cache derived images with traceability to originals.
+`decode_radiograph` applies stored EXIF orientation in memory, converts grayscale/RGB/RGBA sources to grayscale-replicated RGB, and never rewrites originals. `resize_and_pad` uses one scale factor, central black padding and 384×384 output; masks use the same geometry with nearest-neighbour interpolation. `RadiographTransform` applies ImageNet normalization. A 16-image optional cache smoke test wrote deterministic opaque PNGs with source/cache hashes and a configuration fingerprint. The DataLoader reads source paths from manifests; cache use is not silently enabled.
 
 ## 9. Data Augmentation
 
-Pending Phase 3. Mild rotations (up to 7 degrees), translation and intensity changes are intended. Horizontal and vertical flips are disabled. Audit previews show mixed stored orientation, photographic film captures and burned-in text/markers, so Phase 3 must test orientation handling and prevent text/background shortcuts. Severe geometry/color changes are unsuitable defaults. CLAHE is a validated ablation only.
+Fit-only transforms use up to ±7° rotation, 3% translation, 5% scale, mild brightness/contrast and gamma, plus low Gaussian noise. Horizontal/vertical flips and random crops are absent. Calibration, validation and test transforms are deterministic. The Phase 3 batch grid shows recognizable anatomy, preserved aspect ratio and expected padding. Burned-in text, markers, film captures and mixed stored orientation remain shortcut risks for later evaluation. CLAHE and percentile clipping remain disabled.
 
 ## 10. Annotation Workflow
 
@@ -48,7 +48,7 @@ Pending Phase 4. Existing BTXRD boxes/polygons and subtype/risk metadata are ava
 
 ## 11. DataLoader Design
 
-Pending Phase 3. Load only manifest-approved images and return tensors, labels, validity masks and separate metadata. Filenames and source paths never enter predictive tensors. Mask the 10,690 records without subtype/risk/spatial supervision and align image/lesion transforms. Windows workers start at zero until multiprocessing is validated.
+`BoneCancerDataModule` reads only `fit_train.csv`, `calibration.csv`, `val.csv`, and `test.csv`. Executed counts are 4,871; 857; 1,453; and 1,882. A batch returns image `[B,3,384,384]`, binary/subtype/risk targets, concepts, mask `[B,1,384,384]`, nested `valid_task_mask`, and opaque metadata. Source paths, filenames, record IDs and canonical IDs are absent from the top level. Binary labels are valid; subtype, risk, concepts and masks remain invalid until their schema gates open. A runtime decode error yields a zero tensor with every task mask false and a logged error type, preventing a changed/corrupt file from crashing an epoch or borrowing another row's label. Windows workers default to zero; optional weighted sampling is seeded.
 
 ## 12. Baseline Models
 
@@ -120,12 +120,12 @@ Pending Phase 10. Upload, validate, predict, show calibrated confidence/abstenti
 
 ## 29. How to Run Each Phase
 
-Phase 1 environment: `python scripts/00_verify_environment.py`. Phase 2 data audit: run `python scripts/01_index_dataset.py`, `python scripts/02_audit_dataset.py`, and `python scripts/03_find_duplicates.py` in that order, or `./scripts/run_phase.ps1 -Action phase2`. Validation: `pytest -q`, `ruff check .`, and `python -m compileall -q src scripts app tools`. Scripts 04–15 remain inactive until their phases.
+Phase 1 environment: `python scripts/00_verify_environment.py`. Phase 2 audit: scripts 01–03 or `./scripts/run_phase.ps1 -Action phase2`. Phase 3 pipeline: scripts 04 and 06 or `./scripts/run_phase.ps1 -Action phase3`; script 05 provides an optional bounded/full cache. Validation: `python -m pytest -q`, `python -m ruff check .`, and `python -m compileall -q src scripts app tools`. Scripts 07–15 remain inactive until their phases.
 
 ## 30. Common Errors and Troubleshooting
 
-For initial creation when `py -3.11` cannot resolve uv Python, use `uv venv --python 3.11 --seed .venv`. On import failure, activate .venv and install editable. Configs must be mappings without duplicate keys, and outputs cannot overlap source data. A script-01 structural error means inspect `label_audit.csv`; do not weaken validation. Script 02 exits 2 when binary semantics cannot be established. Duplicate counts are not a script error because Phase 3 owns exclusions/split repair. Two `near_blank` results are review flags, not automatic exclusions. Deterministic settings do not promise bitwise portability across hardware/software.
+For initial creation when `py -3.11` cannot resolve uv Python, use `uv venv --python 3.11 --seed .venv`. On import failure, activate `.venv` and install editable; the system Python is not the project interpreter. Configs must be mappings without duplicate keys, and outputs cannot overlap source data. A script-01 structural error means inspect `label_audit.csv`; do not weaken validation. Script 02 exits 2 when binary semantics cannot be established. If script 04/06 changes counts, rerun Phase 2 first when source/audit evidence changed, then inspect clean/split summaries rather than editing CSVs. Two `near_blank` records remain eligible review flags. Deterministic settings reproduce assignments within the pinned environment but do not promise bitwise portability across other hardware/software.
 
 ## 31. Team Review Study Notes
 
-Member 1: study manifest contracts, SHA/pHash/canonical evidence and Phase 3 grouping. Member 2: study the BTXRD workbook, the one subtype conflict and Phase 4 spatial validation. Member 3: keep all baselines on the same future clean manifest. Member 4: keep HOSP-BoneNet optional heads masked/disabled according to coverage. Phase 2 uses pathlib/hashlib, Pillow, ImageHash, NumPy, Pandas, Matplotlib, PyYAML and openpyxl. Audit figures show data properties only; no model metric, radiologist review or clinical verification has been produced.
+Member 1: study manifest contracts, SHA/pHash/canonical evidence and why connected groups cannot cross partitions. Member 2: study the BTXRD workbook, the one subtype conflict and Phase 4 spatial validation. Member 3: study aspect padding, transforms, DataLoader masks and keep all baselines on the same fit/validation/test manifests. Member 4: keep HOSP-BoneNet optional heads masked/disabled according to coverage and reserve calibration for uncertainty work. Phase 3 uses Pillow, OpenCV, Albumentations, NumPy, Pandas, scikit-learn, PyTorch and Matplotlib. Audit/QA figures show data behavior only; no model metric, radiologist review or clinical verification has been produced.

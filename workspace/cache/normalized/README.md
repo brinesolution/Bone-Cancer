@@ -19,7 +19,7 @@ None in Phase 1.
 No functions in this output folder; parent README identifies producers.
 
 ## Theory
-Pending Phase 3; normalization decisions must be validated and versioned.
+Phase 3 applies ImageNet normalization in memory inside `RadiographTransform`; it does not persist normalized arrays here. Any future use of this folder needs a reviewed versioned format and content/config fingerprint.
 
 ## Execution
 Pending owning phase; see parent README.

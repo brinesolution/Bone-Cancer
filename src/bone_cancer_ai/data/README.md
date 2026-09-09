@@ -1,28 +1,28 @@
 # src/bone_cancer_ai/data
 
 ## Purpose
-Manifest validation, indexing, quality, deduplication and reusable image loading.
+Manifest validation, indexing, quality, deduplication, preprocessing and reusable image loading.
 
 ## Files
-`schema.py` defines manifest/issues contracts and strict CSV readers; `indexer.py` decodes and hashes; `quality.py` measures grayscale thumbnails; `provenance.py` reads separate local metadata; `audit.py` verifies/enriches labels and renders figures; `dedupe.py` detects and groups duplicate evidence. Preprocessing, transforms, datasets, samplers and datamodule remain Phase 3 scaffolds.
+`schema.py` defines manifest/issues contracts, opaque IDs and atomic writers; `indexer.py` decodes and hashes; `quality.py` measures thumbnails and builds the clean manifest; `provenance.py` reads separate local metadata; `audit.py` verifies labels; `dedupe.py` groups duplicate evidence; `preprocessing.py` decodes, pads and optionally caches; `transforms.py` owns aligned image/mask transforms; `dataset.py` returns partial-supervision batches; `samplers.py` creates grouped calibration splits and optional class weights; `datamodule.py` owns the four DataLoaders and visual smoke grid.
 
 ## Inputs
-Immutable Main images/CSVs, configured provenance roots and audit thresholds.
+Immutable Main images/CSVs, Phase 2 audit manifests, label schema, and data configuration.
 
 ## Outputs
-Audited manifests, summaries and figures. Safe tensor batches are Phase 3 outputs.
+Audited/clean manifests, grouped split tables, optional derived cache entries, structured tensors and batch QA summaries/figures.
 
 ## Main Libraries
-pathlib, hashlib, Pillow, ImageHash, NumPy, Pandas, Matplotlib, PyYAML and openpyxl.
+pathlib, hashlib, Pillow, OpenCV, Albumentations, NumPy, Pandas, scikit-learn, PyTorch and Matplotlib.
 
 ## Important Functions / Classes
-`load_main_labels`, `inspect_image`, `index_dataset`, `analyze_pixels`, `load_local_provenance`, `audit_labels`, `save_audit_figures`, `find_duplicate_edges`, `build_duplicate_groups` and `summarize_leakage` are active. `record_id=split/image_id` remains unique when source names repeat.
+Phase 3 uses `build_clean_manifest`, `assign_internal_splits`, `split_generation_id`, `decode_radiograph`, `resize_and_pad`, `RadiographTransform`, `BoneCancerDataset`, `BoneCancerDataModule`, `make_weighted_sampler`, `cache_manifest_images`, and `smoke_test_loaders`. `valid_task_mask` prevents missing optional labels from entering losses; runtime decode failure returns an invalid zero sample and keeps the associated row identity/label isolated. The DataModule fingerprints all persisted fields and jointly revalidates the four manifests at the training boundary.
 
 ## Theory
-Byte hashes prove exact identity; pHash Hamming distance screens visually similar images; union-find turns pair evidence into stable groups. Quality thresholds create review flags and never delete data.
+Connected duplicate groups are the strongest available independence unit because patient/study IDs are absent. Official test has highest retention priority, followed by validation and training; lower-priority copies are excluded in derived manifests. Aspect-preserving resize uses one scale and central padding. Images become grayscale-replicated RGB tensors for pretrained encoders; masks share geometry with nearest-neighbour interpolation. Validation transforms are deterministic, while training uses mild affine/intensity noise without flips or crops.
 
 ## Execution
-Run scripts 01–03 in order. Tests: `python -m pytest tests/test_dataset.py tests/test_dedupe.py -q`.
+Run scripts 01–04 then 06, or `./scripts/run_phase.ps1 -Action phase3` after Phase 2 exists. Optional bounded cache: `python scripts/05_build_cache.py --limit 16`. Tests: `python -m pytest tests/test_transforms.py tests/test_splits.py -q`.
 
 ## Notes
-Do not turn pHash candidates into exclusions without a logged Phase 3 rule. Do not derive labels from filenames or write into Main.
+Do not edit generated CSVs/cache entries or derive labels from filenames. pHash-only label conflicts remain flagged for Phase 4 review; exact-byte label-conflict groups are excluded. Optional task gates in `label_schema.yaml` must remain authoritative.

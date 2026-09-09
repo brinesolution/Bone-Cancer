@@ -1,48 +1,52 @@
 # Latest phase handoff
 
-PHASE 2 COMPLETE
+PHASE 3 COMPLETE
 
 Created/changed:
-- Strict label/schema readers, content-hashed provenance loader, image index/quality audit, required figures, and deterministic duplicate/leakage grouping.
-- Active scripts 01–03, ordered PowerShell/VS Code Phase 2 command, openpyxl dependency/freeze, 28 focused Phase 2 tests, and updated data documentation.
-- Four generated manifests, three audit figures, execution summaries, final invariant report, and Phase 2 source snapshot.
+- Clean-manifest schema/policy with opaque IDs, explicit eligibility, exclusions, reviews and held-out-priority leakage correction.
+- Deterministic group-respecting fit/calibration assignment, full split-generation fingerprint, optional weighted sampler and fail-closed joint DataModule validation.
+- Safe grayscale/RGB/RGBA decoding, aspect-preserving padding, aligned image/mask transforms, conservative fit augmentation and deterministic evaluation preprocessing.
+- Partial-supervision Dataset/DataModule, runtime corrupt-image containment, optional traceable resized cache and real-batch QA grid.
+- Active scripts 04–06, ordered PowerShell/VS Code Phase 3 workflow, 30 focused Phase 3 tests, updated project/folder documentation and generated local evidence.
 
 Validation performed:
-- Indexed and decoded all 12,557 Main images; mapped all 12,557 CSV rows with no missing/extra rows and no unreadable files.
-- Required 100% SHA-256 content-anchored provenance coverage before recording binary semantics; standalone audit rerun remained idempotent.
-- Reported exact, canonical and perceptual duplicate evidence, connected groups, cross-split leakage and label conflicts.
-- Visually inspected audit figures and both near-blank flags; recorded orientation, film-capture, burned-in-text and exposure risks.
-- Pytest: 59 passed; focused Phase 2: 28 passed; Ruff, compileall and pip check passed; independent review found no remaining findings.
-- Full source snapshot matched the Phase 1 baseline: 12,560 files and 1,120,418,007 bytes unchanged.
+- Rebuilt the clean manifest and all four split manifests through `./scripts/run_phase.ps1 -Action phase3`; both stages exited 0.
+- Loaded one real batch of eight from fit, calibration, validation and test; every image tensor was `[8,3,384,384]` and mask tensor `[8,1,384,384]`.
+- Verified 9,063 eligible records occur exactly once, with zero record/sample/group overlap, zero stale generation mismatch, zero unassigned rows and zero official validation/test rows moved into training.
+- Tested deterministic validation/loaders/cache, seeded safe augmentation, shape/padding, filename independence, missing/malformed optional labels, aligned masks, a complete mixed valid/corrupt DataLoader epoch, and unsafe/stale split rejection.
+- Visually inspected `preprocessing_batch_grid.png`; anatomy, grayscale conversion and padding are reasonable across all partitions.
+- Pytest: 89 passed; focused Phase 3: 30 passed; Ruff, compileall and pip check passed; independent review found no remaining Critical, Important or Minor findings after fixes.
+- Optional cache: 16 requested, 16 cached, 0 failed; source/cache hashes verified and stale outputs are removed after a failed rebuild.
+- Full source snapshot matched Phase 2: 12,560 files and 1,120,418,007 bytes unchanged.
 
 Results:
-- Binary label 0=`normal` (6,827); label 1=`bone_tumour` (5,730); semantics verified for all images through content-anchored evidence.
-- Train 8,789; validation 1,884; test 1,884. Quality: 12,555 readable, 2 near-blank, 0 unreadable.
-- Partial metadata: risk/boxes/polygons on 1,867 images; unambiguous subtype on 1,866; optional branches remain disabled pending Phase 4.
-- Duplicate audit: 2,045 groups, 6,968 involved images, 13,225 edges, 6,112 cross-split edges including 508 exact-byte edges, and 6 label-conflict edges.
+- Clean manifest: 12,557 total, 9,063 eligible, 3,494 excluded. Reasons: 3,490 lower-priority cross-split duplicates and four records from two exact-byte label-conflict groups.
+- Review flags: 37 records in three pHash-only label-conflict groups and two near-blank records; all remain grouped/traceable.
+- Final split counts: fit 4,871; calibration 857; validation 1,453; test 1,882. Calibration is 14.9616% of the 5,728-record clean official-training pool.
+- Final class counts: fit 2,197 normal/2,674 bone_tumour; calibration 385/472; validation 711/742; test 1,023/859.
+- Binary/sample validity is active. Subtype, risk, concepts and spatial masks remain disabled pending Phase 4 gates.
 - No training, checkpoints, accuracy, AUROC, AUPRC, F1, Dice, calibration or clinical verification results exist.
 
 Outstanding issues:
-- Phase 3 must resolve 1,215 cross-split connected groups through a corrected manifest without moving source files; official folders are unsafe for direct training.
-- Six duplicate candidate pairs conflict in binary label, including two exact-byte conflicts; retain both source labels and log the Phase 3 resolution rule.
-- One BTXRD workbook row has two active subtype columns and remains blank pending Phase 4 review.
-- No patient/study identifier is available. Mixed orientation, film photographs and burned-in text/markers require preprocessing/leakage controls.
+- Phase 4 must review pHash-only label conflicts, the one ambiguous BTXRD subtype row, and validate annotation coordinate conversion/overlays before enabling optional heads.
+- No patient/study identifier is available; duplicate connected groups remain the strongest independence control.
+- Mixed orientation, burned-in text/markers, film photographs and low-exposure/capture artifacts remain shortcut and quality risks for later evaluation.
 
 Do not rerun:
-- Environment creation, dependency installation, scaffold generation or Phase 1 source snapshot creation.
-- Phase 2 audit unless source/configuration changes; never edit generated manifests manually.
-- Do not modify `dataset/Main`, train from official folders, or enable optional heads before their gates.
+- Environment creation, dependency installation, scaffold generation, Phase 1 snapshots or Phase 2 audit unless their source/configuration changes.
+- Clean/split/cache generation unless upstream manifests or Phase 3 policy/configuration changes; never edit generated CSVs/cache files manually.
+- Do not modify `dataset/Main`, train from official folders, or enable subtype/risk/spatial/concept heads before validation gates pass.
 
 Next recommended model:
-SOL
+ASTRA
 
 Why that model:
-Phase 3 requires careful duplicate-group split repair, label-conflict rules, deterministic preprocessing, partial-label DataLoader contracts and leakage tests.
+Phase 4 requires local annotation-tool integration, source/overlay visual inspection, coordinate validation and end-to-end reviewer workflow checks.
 
 Next phase:
-Phase 3 — Cleaning, Manifest-Based Splits, Preprocessing and Loaders
+Phase 4 — Annotation and Labeling System
 
 Resume file:
 E:\Bone Cancer\PROJECT_STATE.md
 
-Manual model switch required: select SOL before continuing; automatic switching is unavailable.
+Manual model switch required: select ASTRA before continuing; automatic switching is unavailable.

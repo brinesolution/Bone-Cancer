@@ -4,25 +4,25 @@
 Audit/evaluation figures.
 
 ## Files
-`dataset_class_distribution.png`, `dimension_distribution.png` and `sample_grid.png` are Phase 2 audit figures. Later evaluation figures remain pending.
+`dataset_class_distribution.png`, `dimension_distribution.png` and `sample_grid.png` are Phase 2 audit figures. `preprocessing_batch_grid.png` is the Phase 3 real-loader QA grid. Later model/evaluation figures remain pending.
 
 ## Inputs
-Audited `dataset_master.csv`.
+Audited manifests and one batch from each Phase 3 split.
 
 ## Outputs
-Executed class-count, stored-dimension and deterministic source-preview figures.
+Executed class-count, stored-dimension, source-preview and preprocessed-batch figures.
 
 ## Main Libraries
 Matplotlib, Pillow and NumPy.
 
 ## Important Functions / Classes
-`save_audit_figures` in `data/audit.py` owns these files.
+`save_audit_figures` owns Phase 2 plots; `smoke_test_loaders` owns the Phase 3 batch grid.
 
 ## Theory
-Plots summarize executed audit rows. The sample grid withholds manifest IDs but keeps source pixels unchanged, so burned-in text may remain visible and must be treated as a leakage/privacy risk.
+The Phase 3 grid denormalizes tensors for display and uses opaque titles. Visual review confirmed recognizable anatomy, grayscale consistency and expected aspect padding across all four splits. Burned-in markers/capture artifacts remain a documented shortcut risk.
 
 ## Execution
-`python scripts/02_audit_dataset.py` regenerates all three figures.
+`python scripts/02_audit_dataset.py` regenerates Phase 2 figures; `python scripts/06_make_internal_splits.py` regenerates the Phase 3 grid.
 
 ## Notes
-Do not edit generated figures manually or present them as clinical review. Inspect stored orientation, exposure, text markers and capture artifacts before Phase 3 preprocessing decisions.
+Do not edit generated figures manually or present visual QA as clinical/radiologist review. No model result is shown here.

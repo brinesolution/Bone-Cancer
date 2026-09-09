@@ -28,13 +28,34 @@ provenance:
   three_class_root: dataset/archive(2)/bone-tumor-dataset
   btxrd_root: dataset/BTXRD
   subtype_detection_root: dataset/archive(3)
+split_policy:
+  heldout_priority: [test, val, train]
+  excluded_quality_statuses: [unreadable, blank]
+  calibration_fraction: 0.15
+  calibration_search_trials: 128
+  exact_label_conflict_action: exclude_group
+  perceptual_label_conflict_action: retain_group_and_flag
 preprocessing:
   preserve_aspect_ratio: true
   pad_to_square: true
   channels: 3
   percentile_clipping: false
+  force_grayscale: true
+  pad_value: 0
+  normalize: imagenet
 augmentation:
   horizontal_flip: false
   vertical_flip: false
   rotation_limit: 7
+  translate_limit: 0.03
+  scale_limit: 0.05
+  brightness_contrast_limit: 0.1
+  gamma_limit: [90, 110]
+  gaussian_noise_std_range: [0.01, 0.03]
   clahe: false
+loader:
+  batch_size: 8
+  num_workers: 0
+  pin_memory: true
+  persistent_workers: false
+  sampling: shuffle

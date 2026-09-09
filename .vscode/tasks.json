@@ -81,6 +81,28 @@
         }
       },
       "problemMatcher": []
+    },
+    {
+      "label": "Run Phase 3 data pipeline",
+      "type": "shell",
+      "command": "${workspaceFolder}/scripts/run_phase.ps1",
+      "args": [
+        "-Action",
+        "phase3"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "shell": {
+          "executable": "powershell.exe",
+          "args": [
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command"
+          ]
+        }
+      },
+      "problemMatcher": []
     }
   ]
 }

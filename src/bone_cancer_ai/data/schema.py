@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -47,6 +48,18 @@ MANIFEST_COLUMNS = (
 
 ISSUE_COLUMNS = ("record_id", "image_id", "official_split", "issue_type", "details", "source")
 
+CLEAN_MANIFEST_COLUMNS = (
+    "sample_id",
+    "duplicate_group",
+    "split_group_id",
+    "clean_pool",
+    "assigned_split",
+    "is_eligible",
+    "review_required",
+    "review_reason",
+    "split_correction_reason",
+)
+
 
 class QualityStatus(StrEnum):
     """Non-destructive image-quality screening outcomes."""
@@ -69,6 +82,14 @@ class LabelInventory:
 def record_id(split: str, image_id: str) -> str:
     """Build the manifest's stable identifier without altering the source filename."""
     return f"{split}/{image_id}"
+
+
+def opaque_id(prefix: str, value: str, length: int = 16) -> str:
+    """Create a stable audit identifier that does not expose a source filename."""
+    if not prefix or not 8 <= length <= 64:
+        raise ValueError("opaque_id requires a prefix and digest length from 8 to 64")
+    digest = hashlib.sha256(str(value).encode("utf-8")).hexdigest()[:length]
+    return f"{prefix}_{digest}"
 
 
 def canonical_source_id(name: str) -> str:

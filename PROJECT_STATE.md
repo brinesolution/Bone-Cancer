@@ -2,10 +2,10 @@
 
 Updated: 2026-09-09 (Asia/Calcutta).
 
-**PHASE 2 COMPLETE — Dataset Audit, Label Verification and Leakage Analysis.**
-Completed phases: 1–2. Phases 3–10: Pending. No model training, checkpoints or performance metrics exist.
+**PHASE 3 COMPLETE — Cleaning, Manifest-Based Splits, Preprocessing and Loaders.**
+Completed phases: 1–3. Phases 4–10: Pending. No model training, checkpoints or performance metrics exist.
 
-Authoritative specification: [master directive](BONE_CANCER_10_PHASE_BUILD_DIRECTIVE.md). Phase 2 engineering record: [PHASE_2_WORK_NOTES.md](PHASE_2_WORK_NOTES.md). Latest-only transition: [PHASE_HANDOFF.md](PHASE_HANDOFF.md).
+Authoritative specification: [master directive](BONE_CANCER_10_PHASE_BUILD_DIRECTIVE.md). Phase 3 engineering record: [PHASE_3_WORK_NOTES.md](PHASE_3_WORK_NOTES.md). Latest-only transition: [PHASE_HANDOFF.md](PHASE_HANDOFF.md).
 
 ## Environment
 
@@ -35,7 +35,7 @@ Binary semantics are verified with independent local metadata plus image-content
 | Quality | 12,555 readable; 2 near-blank/low-exposure; 0 blank; 0 unreadable |
 | Patient/study ID | Unavailable; canonical/duplicate group is the strongest grouping identifier |
 
-The two near-blank flags retain visible anatomy and are review candidates, not automatic exclusions. Visual review shows mixed stored orientation, photographic film captures, variable framing/exposure and burned-in text/markers. Phase 3 must prevent shortcuts from borders/text and validate orientation/preprocessing choices.
+The two near-blank flags retain visible anatomy and are review candidates, not automatic exclusions. Visual review shows mixed stored orientation, photographic film captures, variable framing/exposure and burned-in text/markers. Phase 3 preserved anatomy/aspect ratio and documented these shortcut risks for later evaluation.
 
 ## Partial supervision inventory
 
@@ -66,9 +66,32 @@ Subtype, risk, box and mask branches remain disabled. Availability does not esta
 | Pair edges with label conflicts | 6 |
 | Exact-byte label-conflict edges | 2 |
 
-Evidence totals are 1,080 SHA-256 matches, 11,016 canonical-ID matches and 4,300 pHash candidates; one edge can carry multiple evidence types. Perceptual matches at Hamming distance ≤4 are candidates, while SHA matches establish identical bytes. Phase 3 must resolve label conflicts and create manifest-based corrected splits so no known connected group spans fit/calibration/validation/test. Never move or rename source files.
+Evidence totals are 1,080 SHA-256 matches, 11,016 canonical-ID matches and 4,300 pHash candidates; one edge can carry multiple evidence types. Perceptual matches at Hamming distance ≤4 are candidates, while SHA matches establish identical bytes. Phase 3 resolved training eligibility and partition leakage through derived manifests so no known connected group spans fit/calibration/validation/test. Never move or rename source files.
 
-## Implemented Phase 2 components
+## Clean manifest and final partitions
+
+Phase 3 keeps every source record in `dataset_clean.csv` and records eligibility rather than modifying source folders. Connected groups retain records only in the highest-priority official partition present: test, then validation, then training. This excluded 3,490 lower-priority cross-split copies. Four records across two exact-byte label-conflict groups were excluded. The 37 records in three pHash-only conflict groups remain together and are flagged for review; the two near-blank images also remain eligible and flagged.
+
+| Final status/split | Class 0: normal | Class 1: bone_tumour | Records |
+|---|---:|---:|---:|
+| fit_train | 2,197 | 2,674 | 4,871 |
+| calibration | 385 | 472 | 857 |
+| validation | 711 | 742 | 1,453 |
+| test | 1,023 | 859 | 1,882 |
+| **Eligible total** | **4,316** | **4,747** | **9,063** |
+| excluded | 2,511 | 983 | 3,494 |
+
+The calibration set is 14.9616% of the 5,728-record clean official-training pool and contains 703 of its 4,681 connected groups. Selection uses training groups/labels only. Invariant verification reports zero record overlap, zero connected-group overlap, zero unassigned eligible rows, and zero official validation/test rows moved into fit/calibration. Patient/study IDs remain unavailable.
+
+## Preprocessing and batch contract
+
+All inputs are decoded in memory with EXIF orientation, converted to grayscale-replicated RGB, resized with one aspect-preserving scale, centrally padded to 384×384, and ImageNet-normalized. Fit-only augmentation uses mild affine/intensity/noise transforms; flips and crops are absent. Calibration/validation/test transforms are deterministic. Image and mask geometry share interpolation-aware transforms.
+
+Every batch includes image, binary/subtype/risk targets, concept targets, mask, nested `valid_task_mask`, and opaque metadata. Source filenames/paths/canonical IDs are excluded from predictive batch fields. Current real batches mark binary/sample valid and subtype/risk/concept/mask tasks invalid. Runtime corrupt images return a zero image and all-false validity masks with a logged error type. Real batches of eight loaded successfully from all four splits with image shape `[8,3,384,384]` and mask shape `[8,1,384,384]`.
+
+The optional cache is off by default. A bounded smoke run generated 16 deterministic opaque PNGs under `workspace/cache/resized`, each with verified source/cache hashes and preprocessing fingerprint. Visual review of `preprocessing_batch_grid.png` found recognizable anatomy, consistent grayscale and expected black padding across all splits; mixed orientation, burned-in markers and film/capture artifacts remain documented shortcut risks.
+
+## Implemented through Phase 3
 
 - Strict source CSV contracts, stable record/canonical IDs and atomic CSV/JSON writers.
 - Threaded one-pass image indexing with SHA-256, 64-bit pHash, dimensions, channels, pixel statistics and contained decode errors.
@@ -77,6 +100,11 @@ Evidence totals are 1,080 SHA-256 matches, 11,016 canonical-ID matches and 4,300
 - Deterministic class/dimension figures and anonymized manifest-title sample grid; source pixels remain unchanged.
 - BK-tree pHash search, grouped exact/canonical comparisons, evidence merging and union-find duplicate components.
 - Safe Phase 2 CLI sequence in `scripts/run_phase.ps1 -Action phase2` and VS Code.
+- All-record clean-manifest policy with stable opaque sample/singleton IDs, explicit exclusion/review reasons and held-out priority.
+- Group-respecting deterministic internal calibration split and optional seeded inverse-frequency sampling.
+- Safe radiograph decoder, aspect-preserving image/mask geometry, deterministic validation transforms and conservative fit transforms.
+- Partial-supervision `BoneCancerDataset`, four-split `BoneCancerDataModule`, corrupt-decode containment and real-batch visual QA.
+- Optional content/config-fingerprinted resized cache and ordered Phase 3 PowerShell/VS Code command.
 
 Generated local evidence:
 
@@ -84,16 +112,22 @@ Generated local evidence:
 - `workspace/manifests/quality_report.csv`
 - `workspace/manifests/label_audit.csv`
 - `workspace/manifests/duplicate_groups.csv`
+- `workspace/manifests/dataset_clean.csv`
+- `workspace/manifests/exclusions.csv`
+- `workspace/splits/fit_train.csv`, `calibration.csv`, `val.csv`, `test.csv`
+- `workspace/cache/resized/cache_index.csv` and 16 smoke PNGs
 - `artifacts/figures/dataset_class_distribution.png`
 - `artifacts/figures/dimension_distribution.png`
 - `artifacts/figures/sample_grid.png`
+- `artifacts/figures/preprocessing_batch_grid.png`
 - `logs/dataset_index_summary.json`, `dataset_audit_summary.json`, `duplicate_summary.json`, `phase2_verification.json`, `source_after_phase2.json`
+- `logs/clean_manifest_summary.json`, `internal_split_summary.json`, `cache_summary.json`, `phase3_data_verification.json`, `source_after_phase3.json`
 
 These local data-derived files are Git-ignored and must be regenerated through the scripts rather than edited manually.
 
 ## Verification
 
-Executed Phase 2 CLIs completed with exit 0. Final invariant verification reports `ok: true`: master paths equal the full source-image inventory, manifest IDs equal all label rows, required columns/figures exist, and the Phase 2 source snapshot exactly equals the Phase 1 baseline: 12,560 files, 1,120,418,007 bytes, identical paths/sizes/mtimes/SHA-256.
+Executed Phase 3 CLIs completed with exit 0. Final data invariant verification reports `ok: true`: clean eligibility/exclusions cover all 12,557 records; the four split manifests cover all eligible rows exactly once; record/group overlap and held-out-to-training movement are zero; all manifest paths stay under the source; and cache hashes/locations are safe. The Phase 3 source snapshot exactly equals the Phase 2 baseline: 12,560 files, 1,120,418,007 bytes, identical paths/sizes/mtimes/SHA-256.
 
 Latest checks:
 
@@ -102,13 +136,12 @@ python -m pytest -q
 ruff check .
 python -m compileall -q src scripts app tools
 python -m pip check
-python scripts/01_index_dataset.py
-python scripts/02_audit_dataset.py
-python scripts/03_find_duplicates.py
+./scripts/run_phase.ps1 -Action phase3
+python scripts/05_build_cache.py --limit 16
 ```
 
-Independent Phase 2 review found no remaining Critical, Important or Minor code findings after fixes. It also compared the BK-tree result with brute-force Hamming pairs. No training or inference ran.
+The final full suite passed 89 tests; all 30 focused Phase 3 tests passed. They cover split policy, no filename leakage, shapes, missing/malformed labels, aligned masks, deterministic transforms/loaders/cache, group overlap, stale/mixed generation rejection, outside-source path rejection, and a complete mixed valid/corrupt loader epoch. Ruff, compileall and pip check passed. Independent review found one Important split-boundary issue and two Minor cache/test gaps; all were fixed and reverified. Visual batch QA passed. No training or inference ran; all model metrics remain `Not run`.
 
 ## Next action
 
-Use **SOL** for Phase 3 — Cleaning, Manifest-Based Splits, Preprocessing and Loaders. Automatic model switching is unavailable, so manually select SOL before continuing. Start from the generated manifests and keep duplicate connected components intact across new partitions. Do not rerun environment creation, dependency installation or scaffold generation. Rerun Phase 2 only if its source/configuration changes, and never alter `dataset/Main`.
+Use **ASTRA** for Phase 4 — Annotation and Labeling System. Automatic model switching is unavailable, so manually select ASTRA before continuing. Start from `PROJECT_STATE.md`, the clean/split manifests, and existing disabled partial-label inventory. Phase 4 must validate coordinate conversion and overlays before enabling spatial/subtype/risk supervision. Do not rerun environment creation, Phase 2 audit, clean-manifest generation or split creation unless their inputs/policies change, and never alter `dataset/Main`.

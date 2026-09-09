@@ -4,25 +4,25 @@
 Derived resized radiographs.
 
 ## Files
-README.md: folder contract; no produced files yet.
+Opaque `sample_*.png` images plus `cache_index.csv`. Phase 3 locally generated 16 smoke entries; generated files are Git-ignored.
 
 ## Inputs
-Verified inputs from the owning phase.
+Eligible clean-manifest paths, source hashes, and `configs/data.yaml` preprocessing fields.
 
 ## Outputs
-No outputs yet.
+Aspect-padded, grayscale-replicated RGB PNGs with 384×384 dimensions and index traceability.
 
 ## Main Libraries
-None in Phase 1.
+Pillow, OpenCV, hashlib and Pandas.
 
 ## Important Functions / Classes
-No functions in this output folder; parent README identifies producers.
+`cache_manifest_images` in `data/preprocessing.py`; `scripts/05_build_cache.py` is the producer.
 
 ## Theory
-Pending Phase 3; preserve source aspect ratio and cache provenance.
+One scale factor preserves anatomy, central padding makes a square canvas, and source/cache hashes make derivation auditable.
 
 ## Execution
-Pending owning phase; see parent README.
+`python scripts/05_build_cache.py --limit 16`.
 
 ## Notes
-Do not edit generated records manually. Keep original dataset files untouched. Future-phase scaffolds are not completed functionality; update this README when implementation becomes active.
+Do not edit generated images/indexes manually or treat cached pixels as new labels. The source remains authoritative.
