@@ -103,6 +103,65 @@
         }
       },
       "problemMatcher": []
+    },
+    {
+      "label": "Train baseline: DenseNet121",
+      "type": "process",
+      "command": "${workspaceFolder}/.venv/Scripts/python.exe",
+      "args": [
+        "scripts/09_train_baseline.py",
+        "--config",
+        "configs/baseline_densenet121.yaml"
+      ],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": []
+    },
+    {
+      "label": "Train baseline: EfficientNet-B3",
+      "type": "process",
+      "command": "${workspaceFolder}/.venv/Scripts/python.exe",
+      "args": [
+        "scripts/09_train_baseline.py",
+        "--config",
+        "configs/baseline_efficientnet_b3.yaml"
+      ],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": []
+    },
+    {
+      "label": "Train baseline: ConvNeXt-Tiny",
+      "type": "process",
+      "command": "${workspaceFolder}/.venv/Scripts/python.exe",
+      "args": [
+        "scripts/09_train_baseline.py",
+        "--config",
+        "configs/baseline_convnext_tiny.yaml"
+      ],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": []
+    },
+    {
+      "label": "Train baseline: Swin-Tiny",
+      "type": "process",
+      "command": "${workspaceFolder}/.venv/Scripts/python.exe",
+      "args": [
+        "scripts/09_train_baseline.py",
+        "--config",
+        "configs/baseline_swin_tiny.yaml"
+      ],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": []
+    },
+    {
+      "label": "Validate Phase 5 artifacts",
+      "type": "process",
+      "command": "${workspaceFolder}/.venv/Scripts/python.exe",
+      "args": [
+        "scripts/09_train_baseline.py",
+        "--validate-artifacts"
+      ],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": []
     }
   ]
 }

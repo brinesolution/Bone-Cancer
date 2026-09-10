@@ -12,6 +12,21 @@ from uuid import uuid4
 import pandas as pd
 import torch
 
+BASELINE_SUMMARY_COLUMNS = [
+    "model",
+    "seed",
+    "best_epoch",
+    "AUROC",
+    "AUPRC",
+    "balanced_accuracy",
+    "F1",
+    "sensitivity",
+    "specificity",
+    "MCC",
+    "params",
+    "latency_ms",
+]
+
 
 def confusion_matrix_frame(metrics: Mapping[str, object]) -> pd.DataFrame:
     """Format a ``[[TN, FP], [FN, TP]]`` matrix with explicit axis labels."""
@@ -59,6 +74,30 @@ def atomic_write_csv(frame: pd.DataFrame, destination: Path) -> None:
         os.replace(temporary, destination)
     finally:
         temporary.unlink(missing_ok=True)
+
+
+def update_baseline_summary(destination: Path, row: Mapping[str, object]) -> None:
+    """Atomically upsert one executed baseline result by model and seed."""
+    if set(row) != set(BASELINE_SUMMARY_COLUMNS):
+        missing = sorted(set(BASELINE_SUMMARY_COLUMNS) - set(row))
+        extra = sorted(set(row) - set(BASELINE_SUMMARY_COLUMNS))
+        raise ValueError(f"baseline summary row schema mismatch; missing={missing}, extra={extra}")
+    destination = Path(destination)
+    incoming = pd.DataFrame(
+        [[row[column] for column in BASELINE_SUMMARY_COLUMNS]],
+        columns=BASELINE_SUMMARY_COLUMNS,
+    )
+    if destination.exists():
+        existing = pd.read_csv(destination)
+        if existing.columns.tolist() != BASELINE_SUMMARY_COLUMNS:
+            raise ValueError("existing baseline summary has an invalid schema")
+        keep = ~(
+            existing["model"].eq(row["model"])
+            & existing["seed"].eq(row["seed"])
+        )
+        incoming = pd.concat([existing.loc[keep], incoming], ignore_index=True)
+    incoming = incoming.sort_values(["model", "seed"], kind="stable").reset_index(drop=True)
+    atomic_write_csv(incoming, destination)
 
 
 def measure_inference_latency(
