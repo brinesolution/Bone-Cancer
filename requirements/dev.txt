@@ -6,5 +6,6 @@ mypy
 jupyter
 ipykernel
 streamlit
+labelme==6.3.1
 fastapi
 uvicorn

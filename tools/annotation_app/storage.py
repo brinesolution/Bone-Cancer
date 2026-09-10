@@ -1,4 +1,5 @@
-"""Scaffold reserved for Phase 4."""
+"""Public annotation persistence interface."""
 
-if __name__ == "__main__":
-    raise SystemExit("Not implemented: Phase 4 is pending.")
+from bone_cancer_ai.annotations.storage import AnnotationStore
+
+__all__ = ["AnnotationStore"]

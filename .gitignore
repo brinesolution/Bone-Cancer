@@ -22,6 +22,14 @@ dist/
 *.onnx
 # Generated/private records remain local; preserve folder documentation.
 /workspace/**/*.csv
+/workspace/annotations/*.sqlite3*
+/workspace/annotations/labelme/**/*
+/workspace/annotations/spatial_reviews/**/*
+/workspace/annotations/source_imports/**/*
+!/workspace/annotations/labelme/README.md
+!/workspace/annotations/spatial_reviews/README.md
+!/workspace/annotations/source_imports/README.md
+/workspace/annotations/*.json
 /workspace/cache/**/*
 !/workspace/cache/**/
 !/workspace/cache/**/README.md

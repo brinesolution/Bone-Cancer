@@ -1,6 +1,6 @@
 # Project guide
 
-Phases 1–3 establish the environment, audited data inventory, leakage-controlled manifests and deterministic DataLoaders. The audit executed against every Main image; Phase 4 and later descriptions remain approved design rather than completed functionality.
+Phases 1–4 establish the environment, audited data inventory, leakage-controlled manifests, deterministic DataLoaders and a working annotation workflow. Phase 5 and later model/training descriptions remain approved design rather than completed functionality.
 
 ## 1. Project Overview
 
@@ -18,7 +18,7 @@ Separate local metadata maps one-to-one by canonical source ID across all Main r
 
 ## 4. Folder Structure
 
-`src/bone_cancer_ai` owns reusable logic; `scripts` orchestrates; `configs` holds decisions. `dataset/Main` is immutable. `workspace` stores local derived metadata/cache; `experiments` stores unique runs; `artifacts` stores outputs; `logs` stores evidence. Annotation tools, app and notebooks are inactive scaffolds. Every authored meaningful folder has a README; none is inserted into source data.
+`src/bone_cancer_ai` owns reusable logic; `scripts` orchestrates; `configs` holds decisions. `dataset/Main` is immutable. `workspace` stores local metadata/cache/annotation revisions; `experiments` stores unique runs; `artifacts` stores outputs; `logs` stores evidence. `tools/annotation_app` is active; the inference app and notebooks remain scaffolds. Every major folder has a README; none is inserted into source data.
 
 ## 5. Environment Setup
 
@@ -44,7 +44,11 @@ Fit-only transforms use up to ±7° rotation, 3% translation, 5% scale, mild bri
 
 ## 10. Annotation Workflow
 
-Pending Phase 4. Existing BTXRD boxes/polygons and subtype/risk metadata are available for 1,867 images but remain disabled until coordinate conversion, overlays and source conflicts are validated. Record image ID, labels including unknown, reviewer, timestamp, notes and revisions. Project annotations are not radiologist/pathology ground truth without real verification.
+Implemented in Phase 4. Script07 launches local metadata review with source image/ID, unknown-aware binary/subtype/risk/concepts, actual reviewer, notes, autosave, revision history, navigation, progress and CSV export. SQLite uses optimistic revisions to reject stale overwrites. Concept unknown is separate from assessed-absent. No review is inferred from filenames or source labels.
+
+LabelMe edits opaque hash-bound copies. Manual polygon/box JSONs import into immutable spatial revisions. Native-resolution polygons rasterize as a 0/1 union; rectangles remain xyxy boxes without fabricated masks. Geometry and overlay checks preserve coordinate alignment. Script08 separately converted all 1,867 BTXRD JSONs: 1,825 unique Main-image records validate, 16 conflicting drawings across eight exact-image groups are quarantined, and 26 have no eligible exact match. One accepted subtype remains unknown. The first rejected conversion is retained as failure evidence; current indexes reference the accepted generation.
+
+Exact bytes alone do not establish drawing agreement: duplicate source JSONs must agree before reuse. Latest indexes are checked against immutable generations, original hashes, metadata, masks and boxes. Human project reviews remain zero; test fixtures are isolated. Source mechanical validation and technical overlay QA are not radiologist/pathology verification. Optional tasks remain disabled until accepted labels are explicitly joined to unchanged fit/calibration/validation/test assignments and missing targets retain validity masks. See [the complete workflow](workspace/annotations/README.md).
 
 ## 11. DataLoader Design
 

@@ -4,13 +4,13 @@
 Reusable research pipeline.
 
 ## Files
-__init__.py: package version; data/models/losses/training/evaluation/explainability/inference: future modules; utils/: Phase 1 functionality.
+__init__.py: version; utils/: environment/config/source safety; data/: audit, leakage control, preprocessing and loaders; annotations/: review, revisions, LabelMe conversion and validation. Models/losses/training/evaluation/explainability/inference remain future phases.
 
 ## Inputs
 Config, future verified manifests and tensors.
 
 ## Outputs
-Phase 1 infrastructure only; model outputs Not run.
+Verified manifests, loaders and local annotation artifacts; model outputs Not run.
 
 ## Main Libraries
 See utils/README.md for actual APIs.

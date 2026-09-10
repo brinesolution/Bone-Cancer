@@ -1,28 +1,28 @@
 # tools/annotation_app
 
 ## Purpose
-Annotation interface scaffold.
+Local Streamlit annotation review interface. See [the complete workflow](../../workspace/annotations/README.md).
 
 ## Files
-app.py: future interface; storage.py: revision persistence; validators.py: schema validation.
+app.py: review controls and autosave callbacks; storage.py and validators.py: public exports of reusable package APIs.
 
 ## Inputs
 Verified schema and local radiographs.
 
 ## Outputs
-Pending annotations with reviewer/timestamp/revision.
+Metadata history, CSV download, staged LabelMe copies, immutable spatial revisions and progress counts.
 
 ## Main Libraries
-None in Phase 1.
+Streamlit, Pandas and the project annotation package; LabelMe/PyQt5 runs as a separate local process.
 
 ## Important Functions / Classes
-No working tool yet; entry points fail explicitly.
+AnnotationStore saves optimistic revisions. Session callbacks reload saved values and preserve unknown labels. Core logic lives in src/bone_cancer_ai/annotations.
 
 ## Theory
 Spatial alignment and provenance must be validated before annotation-derived supervision.
 
 ## Execution
-Pending Phase 4.
+Run `.\.venv\Scripts\python.exe scripts/07_launch_annotation_tool.py` from the project root. The server binds to 127.0.0.1:8502. Use --config for an alternate workspace. AppTest covers editing, autosave and navigation on synthetic fixtures.
 
 ## Notes
-Do not edit generated records manually. Keep original dataset files untouched. Future-phase scaffolds are not completed functionality; update this README when implementation becomes active.
+Do not edit generated records manually. Keep original dataset files untouched. This annotation interface is separate from the later inference/demo app.

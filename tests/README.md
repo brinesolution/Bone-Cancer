@@ -25,4 +25,6 @@ Synthetic geometric supports check transform alignment; invariant tests establis
 `python -m pytest -q`; focused: `python -m pytest tests/test_splits.py tests/test_transforms.py -q`.
 
 ## Notes
+Phase 4 adds metadata revision/stale-write/unknown validation, Streamlit AppTest navigation/autosave, LabelMe geometry/source safety, immutable spatial history, CLI failure status and source-import exact-duplicate/conflict regressions. The pinned LabelMe native Qt smoke loads/edits/saves/reloads a synthetic image offscreen with isolated settings; it imports LabelMe before Qt for Windows DLL order. No clinical labels are produced by tests.
+
 Keep tests independent of private source filenames and never lower leakage/label safety assertions to pass a run.

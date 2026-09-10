@@ -1,5 +1,5 @@
 param(
-    [ValidateSet('verify', 'test', 'lint', 'compile', 'phase2', 'phase3')]
+    [ValidateSet('verify', 'test', 'lint', 'compile', 'phase2', 'phase3', 'phase4')]
     [string]$Action = 'verify'
 )
 
@@ -40,6 +40,7 @@ try {
             'test' { & $projectPython -m pytest -q }
             'lint' { & $projectPython -m ruff check . }
             'compile' { & $projectPython -m compileall -q src scripts app tools }
+            'phase4' { & $projectPython 'scripts/08_validate_annotations.py' }
         }
         $resultCode = $LASTEXITCODE
     }

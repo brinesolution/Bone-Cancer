@@ -26,3 +26,5 @@ The Phase 3 grid denormalizes tensors for display and uses opaque titles. Visual
 
 ## Notes
 Do not edit generated figures manually or present visual QA as clinical/radiologist review. No model result is shown here.
+
+Phase 4 adds phase4_annotation_overlay_grid.png, assembled from 12 accepted source-conversion overlays. Red fills are native-coordinate polygon unions; yellow rectangles are source boxes. Three full overlays and the grid were inspected for alignment. Conversion uses annotations.spatial.render_overlay; the local grid command is `python logs/phase4_make_qa_grid.py`, using the preserved import report. This is technical QA only, with no model predictions or clinical verification.

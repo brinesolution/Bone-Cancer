@@ -1,4 +1,5 @@
-"""Scaffold reserved for Phase 4."""
+"""Public unknown-aware metadata validator."""
 
-if __name__ == "__main__":
-    raise SystemExit("Not implemented: Phase 4 is pending.")
+from bone_cancer_ai.annotations.schema import validate_metadata
+
+__all__ = ["validate_metadata"]

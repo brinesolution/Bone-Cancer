@@ -1,11 +1,13 @@
 # Project state
 
-Updated: 2026-09-09 (Asia/Calcutta).
+Updated: 2026-09-10 (Asia/Calcutta).
 
-**PHASE 3 COMPLETE — Cleaning, Manifest-Based Splits, Preprocessing and Loaders.**
-Completed phases: 1–3. Phases 4–10: Pending. No model training, checkpoints or performance metrics exist.
+**PHASE 4 COMPLETE — Annotation and Labeling System.**
+Completed phases: 1–4. Phases 5–10 Pending. No model training, checkpoints or performance metrics exist.
 
-Authoritative specification: [master directive](BONE_CANCER_10_PHASE_BUILD_DIRECTIVE.md). Phase 3 engineering record: [PHASE_3_WORK_NOTES.md](PHASE_3_WORK_NOTES.md). Latest-only transition: [PHASE_HANDOFF.md](PHASE_HANDOFF.md).
+Phase 4 delivered the local metadata app, native LabelMe integration, immutable revisions, exact-image/conflict-aware source conversion, masks/boxes/overlays, master CSVs and validation. The full suite passed 126 tests. The accepted source generation contains 1,825 unique images with masks and boxes; all 1,825 reconvert with zero validation issues. Sixteen conflicting source JSONs and 26 unmatched JSONs are excluded explicitly. Human project reviews remain zero and clinical verification remains Unavailable. See PHASE_4_WORK_NOTES.md and PHASE_HANDOFF.md for evidence and limits.
+
+Authoritative specification: [master directive](BONE_CANCER_10_PHASE_BUILD_DIRECTIVE.md). Engineering records: [Phase 3](PHASE_3_WORK_NOTES.md), [Phase 4](PHASE_4_WORK_NOTES.md). Latest-only transition: [PHASE_HANDOFF.md](PHASE_HANDOFF.md).
 
 ## Environment
 
@@ -47,7 +49,7 @@ Configured read-only provenance produced 18,170 evidence rows. Exactly 18,160 ma
 - Concepts: unavailable.
 - `IMG001276.jpeg` activates two workbook subtype columns. Its subtype remains blank and the conflict is retained in `label_audit.csv` for Phase 4.
 
-Subtype, risk, box and mask branches remain disabled. Availability does not establish spatial alignment or clinical/expert verification; Phase 4 owns annotation conversion, overlays and activation.
+Subtype, risk, box and mask branches remain disabled. Phase 4 mechanically validated a conflict-free spatial subset and representative overlays, but did not release optional labels into the fingerprinted training manifests. A deliberate validated supervision release must join accepted annotations without changing existing partition assignments; unsupported branches and unresolved labels must stay masked. Clinical/expert verification remains Unavailable.
 
 ## Duplicate and leakage findings
 
@@ -91,7 +93,7 @@ Every batch includes image, binary/subtype/risk targets, concept targets, mask, 
 
 The optional cache is off by default. A bounded smoke run generated 16 deterministic opaque PNGs under `workspace/cache/resized`, each with verified source/cache hashes and preprocessing fingerprint. Visual review of `preprocessing_batch_grid.png` found recognizable anatomy, consistent grayscale and expected black padding across all splits; mixed orientation, burned-in markers and film/capture artifacts remain documented shortcut risks.
 
-## Implemented through Phase 3
+## Implemented through Phase 4
 
 - Strict source CSV contracts, stable record/canonical IDs and atomic CSV/JSON writers.
 - Threaded one-pass image indexing with SHA-256, 64-bit pHash, dimensions, channels, pixel statistics and contained decode errors.
@@ -105,6 +107,9 @@ The optional cache is off by default. A bounded smoke run generated 16 determini
 - Safe radiograph decoder, aspect-preserving image/mask geometry, deterministic validation transforms and conservative fit transforms.
 - Partial-supervision `BoneCancerDataset`, four-split `BoneCancerDataModule`, corrupt-decode containment and real-batch visual QA.
 - Optional content/config-fingerprinted resized cache and ordered Phase 3 PowerShell/VS Code command.
+- Unknown-aware Streamlit metadata app, transactional SQLite history, optimistic revisions, CSV export and progress counts.
+- Local LabelMe 6.3.1 staging, source hash bindings, polygon/box conversion, immutable spatial reviewer history and overlays.
+- Exact-image duplicate source-annotation agreement checks, conflict quarantine, unique master indexes and full artifact/provenance revalidation.
 
 Generated local evidence:
 
@@ -122,14 +127,18 @@ Generated local evidence:
 - `artifacts/figures/preprocessing_batch_grid.png`
 - `logs/dataset_index_summary.json`, `dataset_audit_summary.json`, `duplicate_summary.json`, `phase2_verification.json`, `source_after_phase2.json`
 - `logs/clean_manifest_summary.json`, `internal_split_summary.json`, `cache_summary.json`, `phase3_data_verification.json`, `source_after_phase3.json`
+- `workspace/annotations/source_annotations.csv`, `source_annotation_issues.csv`, `image_labels.csv`, `reviews.sqlite3`
+- Accepted annotation generation `workspace/annotations/source_imports/c204d1f6873644948e4f355f26b399ae/`
+- `artifacts/figures/phase4_annotation_overlay_grid.png`
+- `logs/phase4_annotation_validation.json`, `phase4_source_import.json`, `phase4_pytest.txt`, `source_after_phase4.json`, `phase4_split_preservation.json`
 
 These local data-derived files are Git-ignored and must be regenerated through the scripts rather than edited manually.
 
-## Verification
+## Phase 3 verification (retained evidence)
 
 Executed Phase 3 CLIs completed with exit 0. Final data invariant verification reports `ok: true`: clean eligibility/exclusions cover all 12,557 records; the four split manifests cover all eligible rows exactly once; record/group overlap and held-out-to-training movement are zero; all manifest paths stay under the source; and cache hashes/locations are safe. The Phase 3 source snapshot exactly equals the Phase 2 baseline: 12,560 files, 1,120,418,007 bytes, identical paths/sizes/mtimes/SHA-256.
 
-Latest checks:
+Phase 3 executed commands:
 
 ```powershell
 python -m pytest -q
@@ -142,6 +151,16 @@ python scripts/05_build_cache.py --limit 16
 
 The final full suite passed 89 tests; all 30 focused Phase 3 tests passed. They cover split policy, no filename leakage, shapes, missing/malformed labels, aligned masks, deterministic transforms/loaders/cache, group overlap, stale/mixed generation rejection, outside-source path rejection, and a complete mixed valid/corrupt loader epoch. Ruff, compileall and pip check passed. Independent review found one Important split-boundary issue and two Minor cache/test gaps; all were fixed and reverified. Visual batch QA passed. No training or inference ran; all model metrics remain `Not run`.
 
+## Phase 4 verification and coverage
+
+`python scripts/08_validate_annotations.py --import-source` exited 0 after inspecting all 1,867 BTXRD JSONs. The accepted index has 1,825 unique sample IDs, 1,825 masks and 1,825 box records; full reconversion reports valid=true, zero issues. Sixteen JSONs across eight exact-image groups have conflicting drawings and are quarantined; 26 sources lack an eligible byte-exact match. One accepted record still has unknown subtype. Source clean-pool coverage is train_pool 1,284, validation 281, test 260; train_pool is not a final fit assignment and must still join the preserved fit/calibration manifests before training.
+
+All 126 tests passed, including synthetic Streamlit autosave/navigation/unknown handling, native LabelMe load/edit/save/reload, stale revisions, geometry, duplicate disagreement, provenance drift and invalid-artifact exit codes. Ruff, compileall and pip check passed. Independent review found no remaining material issues after fixes. Three native-resolution overlays plus the 12-image grid were inspected for coordinate consistency; this is technical QA, not clinical verification. The local server and real-data AppTest loaded successfully. Browser automation reported no browser available; interactive browser visual QA is not claimed.
+
+The Phase 4 source snapshot equals Phase 3 exactly: 12,560 files, 1,120,418,007 bytes, unchanged paths/sizes/mtimes/SHA-256. DataModule setup revalidated all split fingerprints and preserved fit 4,871 / calibration 857 / validation 1,453 / test 1,882. No source labels, source images or training split files were rewritten.
+
+The initial rejected generation `dd8bf4e772474d6b89ee7b2d0e69b541` is retained only as failed-run evidence in `phase4_initial_import_rejected.json`; do not consume it. Latest source indexes point to the accepted generation above. Human annotation coverage remains zero: synthetic test reviews are isolated under logs. The 16 conflicting source drawings, ambiguous subtype, pHash-only binary conflicts and clinical verification still require qualified human input; they are not fabricated or silently resolved.
+
 ## Next action
 
-Use **ASTRA** for Phase 4 — Annotation and Labeling System. Automatic model switching is unavailable, so manually select ASTRA before continuing. Start from `PROJECT_STATE.md`, the clean/split manifests, and existing disabled partial-label inventory. Phase 4 must validate coordinate conversion and overlays before enabling spatial/subtype/risk supervision. Do not rerun environment creation, Phase 2 audit, clean-manifest generation or split creation unless their inputs/policies change, and never alter `dataset/Main`.
+Manually select **SOL** before Phase 5 — Standard Comparison Baselines. Automatic primary-model switching is unavailable. Use one configurable implementation for DenseNet121, EfficientNet-B3, ConvNeXt-Tiny and Swin-Tiny, preserving existing verified splits, binary semantics, preprocessing and fair training budgets. Verify CUDA/model forward-backward before training; Phase 5 has not started. Do not rerun environment setup, dataset audit, split generation or source conversion unless inputs/configuration change. Launch annotation review with `.\.venv\Scripts\python.exe scripts/07_launch_annotation_tool.py` as needed. Never alter `dataset/Main`.

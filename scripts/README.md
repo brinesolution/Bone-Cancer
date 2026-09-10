@@ -4,7 +4,7 @@
 Phase command entry points.
 
 ## Files
-`00_verify_environment.py` verifies the environment. Scripts 01–03 perform the Phase 2 audit. `04_build_clean_manifest.py` applies logged quality/conflict/leakage rules; `05_build_cache.py` optionally writes traceable resized PNGs; `06_make_internal_splits.py` creates four grouped partitions, loads real batches and writes the QA grid. Scripts 07–15 remain phase-gated. `run_phase.ps1` exposes checks plus ordered Phase 2 and Phase 3 workflows.
+`00_verify_environment.py` verifies the environment. Scripts 01–03 perform the Phase 2 audit. `04_build_clean_manifest.py` applies logged quality/conflict/leakage rules; `05_build_cache.py` optionally writes traceable resized PNGs; `06_make_internal_splits.py` creates grouped partitions and QA batches. `07_launch_annotation_tool.py` checks/launches local review; `08_validate_annotations.py` validates project/source records and exports CSV, with --import-source creating a new conversion generation. Scripts 09–15 remain phase-gated. `run_phase.ps1` exposes checks plus ordered Phase 2/3 workflows.
 
 ## Inputs
 Configuration, installed package, immutable source data, label schema, and Phase 2 manifests in stage order.

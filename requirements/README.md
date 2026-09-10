@@ -39,3 +39,5 @@ No Python functions live here. Requirements express dependency intent; the freez
 OpenCV uses `opencv-python-headless` instead of `opencv-python`: Albumentations and Grad-CAM both require this distribution, and this project does not use cv2 GUI windows. The two distributions share the same `cv2` namespace and must not coexist. The API remains OpenCV; future annotation/UI work uses dedicated GUI tooling. See the [OpenCV package installation guidance](https://pypi.org/project/opencv-python-headless/).
 
 Phase 2 adds `openpyxl` to read the existing BTXRD `.xlsx` metadata without converting or modifying it. It is part of `base.txt` and the refreshed Windows freeze.
+
+Phase 4 adds pinned `labelme==6.3.1` to dev requirements, using its PyQt5 drawing interface with manual boxes/polygons. No annotation models are downloaded or run. Its native test uses the installed API and initializes LabelMe before Qt, as required by the package's Windows DLL initialization. Streamlit 1.63.0 provides the metadata app; the native editor runs in a separate process. Use script07 rather than opening source datasets for editing.

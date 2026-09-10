@@ -22,7 +22,7 @@ PyYAML via utils.config.
 Audit parameters control pHash/quality screening. The Phase 3 policy gives test then validation then train retention priority for connected groups, excludes exact-byte conflicts, retains pHash-only conflicts for review, and reserves 15% of clean official training for grouped calibration. Preprocessing uses grayscale-replicated RGB, aspect padding to 384 and ImageNet normalization. Training transforms prohibit flips/crops.
 
 ## Execution
-Run scripts 01–04 and 06 with `--config configs/data.yaml`; script 05 is optional.
+Run scripts 01–04 and 06 with `--config configs/data.yaml`; script 05 is optional. Scripts 07/08 use `annotation.yaml`, which references data.yaml plus annotation root, database, eligible manifest, loopback port, tri-state concept names and allowed spatial classes. Source class vocabulary stays in label_schema.yaml. Annotation review never silently changes training gates.
 
 ## Notes
 Policy action names are validated and unsupported silent-relabel behavior fails. After a reviewed change, rerun every affected upstream/downstream stage. Never point outputs into the source dataset.

@@ -1,0 +1,16 @@
+data_config: data.yaml
+annotation_root: workspace/annotations
+manifest: workspace/manifests/dataset_clean.csv
+database: workspace/annotations/reviews.sqlite3
+host: 127.0.0.1
+port: 8502
+concept_names:
+  - lytic
+  - sclerotic
+  - mixed
+  - cortical_destruction
+  - periosteal_reaction
+  - soft_tissue_component
+  - matrix_mineralization
+  - wide_zone_of_transition
+spatial_labels: [lesion]

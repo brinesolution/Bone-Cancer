@@ -1,5 +1,15 @@
 # Changelog
 
+## 2026-09-10 — Phase 4 verified
+
+- Added local Streamlit metadata review with unknown-aware controls, actual reviewer/status/notes, autosave, optimistic SQLite revisions, navigation, progress and master CSV export.
+- Integrated pinned LabelMe 6.3.1 using opaque exact-byte copies, source bindings and immutable reviewer-owned spatial revisions.
+- Added native-coordinate polygon unions, xyxy boxes, overlays and strict label/geometry/hash/provenance validation. Boxes never fabricate segmentation masks.
+- Inspected all 1,867 BTXRD JSONs; accepted 1,825 unique mask/box records with zero validation errors, quarantined 16 conflicting source drawings and reported 26 unmatched sources.
+- Fixed conflicting exact-image annotation overwrite, duplicate index rows, false-success validation exits, audit/overlay drift checks and excessive preflight mask retention. Independent review closed all material findings.
+- Passed 126 tests, Ruff, compileall and pip check; native LabelMe and Streamlit AppTest workflows passed. Inspected the 12-image overlay grid and three full overlays. Browser automation was unavailable; no browser visual QA is claimed.
+- Source snapshot and all four split counts/fingerprints remain unchanged. No human/clinical verification, training or performance metrics were fabricated. Optional supervision release remains pending.
+
 ## 2026-09-09 — Phase 3 verified
 
 - Added an all-record clean manifest with opaque sample/group IDs, explicit exclusions/review flags, and held-out priority that never moves validation/test records into training.

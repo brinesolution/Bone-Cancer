@@ -26,3 +26,5 @@ Run the owning CLI. Phase 3 ordered execution is `./scripts/run_phase.ps1 -Actio
 
 ## Notes
 Do not edit evidence manually or overwrite Phase 1 baselines. Logs contain local absolute paths and remain Git-ignored.
+
+Phase 4 records full import/validation, initial rejected conversion, pytest output, LabelMe installation/CLI checks, unchanged source snapshot and preserved DataModule split counts. phase4_source_import.json preserves the accepted generation and coverage; phase4_annotation_validation.json is the latest validation report. phase4_make_qa_grid.py assembles existing overlays for technical inspection. These logs report source/project provenance separately and contain no model-performance claims.
