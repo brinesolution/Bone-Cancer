@@ -17,6 +17,9 @@ import yaml
 from bone_cancer_ai.evaluation import reports as report_module
 
 SCRIPT_PATH = Path(__file__).parents[1] / "scripts" / "09_train_baseline.py"
+CANONICAL_SCHEMA_PATH = (
+    SCRIPT_PATH.parents[1] / "workspace" / "annotations" / "label_schema.yaml"
+)
 SPEC = importlib.util.spec_from_file_location("baseline_cli", SCRIPT_PATH)
 assert SPEC is not None and SPEC.loader is not None
 baseline_cli = importlib.util.module_from_spec(SPEC)
@@ -37,10 +40,9 @@ def _project_config(tmp_path: Path, **common_updates: object) -> Path:
         root.joinpath("workspace", "splits", f"{split}.csv").write_text(
             f"assigned_split\n{split}\n", encoding="utf-8"
         )
-    _write_yaml(
-        root / "workspace" / "annotations" / "label_schema.yaml",
-        {"binary": {"enabled": True, "classes": {0: "normal", 1: "bone_tumour"}}},
-    )
+    schema_path = root / "workspace" / "annotations" / "label_schema.yaml"
+    schema_path.parent.mkdir(parents=True, exist_ok=True)
+    schema_path.write_bytes(CANONICAL_SCHEMA_PATH.read_bytes())
     _write_yaml(
         root / "configs" / "data.yaml",
         {
@@ -50,9 +52,33 @@ def _project_config(tmp_path: Path, **common_updates: object) -> Path:
             "schema_path": "workspace/annotations/label_schema.yaml",
             "image_size": 384,
             "seed": 42,
-            "preprocessing": {"normalize": "imagenet", "force_grayscale": True},
-            "augmentation": {"horizontal_flip": False, "vertical_flip": False},
-            "loader": {"batch_size": 8, "num_workers": 0},
+            "preprocessing": {
+                "preserve_aspect_ratio": True,
+                "pad_to_square": True,
+                "channels": 3,
+                "percentile_clipping": False,
+                "force_grayscale": True,
+                "pad_value": 0,
+                "normalize": "imagenet",
+            },
+            "augmentation": {
+                "horizontal_flip": False,
+                "vertical_flip": False,
+                "rotation_limit": 7,
+                "translate_limit": 0.03,
+                "scale_limit": 0.05,
+                "brightness_contrast_limit": 0.1,
+                "gamma_limit": [90, 110],
+                "gaussian_noise_std_range": [0.01, 0.03],
+                "clahe": False,
+            },
+            "loader": {
+                "batch_size": 8,
+                "num_workers": 0,
+                "pin_memory": True,
+                "persistent_workers": False,
+                "sampling": "shuffle",
+            },
         },
     )
     common = {
@@ -84,6 +110,15 @@ def _project_config(tmp_path: Path, **common_updates: object) -> Path:
     model_config = root / "configs" / "baseline_densenet121.yaml"
     _write_yaml(model_config, {"model": "densenet121", "common_config": "train.yaml"})
     return model_config
+
+
+def _mutate_data_config(
+    config: Path, section: str, key: str, value: object
+) -> None:
+    data_path = config.parent / "data.yaml"
+    data = yaml.safe_load(data_path.read_text(encoding="utf-8"))
+    data[section][key] = value
+    _write_yaml(data_path, data)
 
 
 @pytest.mark.parametrize(
@@ -223,6 +258,21 @@ def test_config_resolution_requires_schema_and_all_workspace_splits(
 
     with pytest.raises(FileNotFoundError, match="schema|split"):
         baseline_cli.resolve_config(config)
+
+
+def test_schema_path_must_be_the_canonical_workspace_schema_before_allocation(
+    tmp_path: Path,
+) -> None:
+    config = _project_config(tmp_path)
+    data_path = config.parent / "data.yaml"
+    data = yaml.safe_load(data_path.read_text(encoding="utf-8"))
+    data["schema_path"] = "workspace/splits/fit_train.csv"
+    _write_yaml(data_path, data)
+
+    with pytest.raises(ValueError, match="canonical label_schema"):
+        baseline_cli.run_baseline(config, dependencies=_fake_dependencies([]))
+
+    assert not (config.parents[1] / "experiments").exists()
 
 
 def test_unknown_model_fails_in_a_real_subprocess_before_training(tmp_path: Path) -> None:
@@ -541,6 +591,67 @@ def test_valid_yaml_policy_deviation_cannot_publish_summary(tmp_path: Path) -> N
     assert not (config.parents[1] / "artifacts" / "metrics" / "baseline_summary.csv").exists()
 
 
+@pytest.mark.parametrize(
+    ("section", "key", "value"),
+    [
+        ("preprocessing", "normalize", "dataset"),
+        ("augmentation", "rotation_limit", 8),
+        ("loader", "sampling", "sequential"),
+    ],
+)
+def test_data_policy_mutation_is_smoke_and_cannot_publish_summary(
+    tmp_path: Path, section: str, key: str, value: object
+) -> None:
+    config = _project_config(tmp_path)
+    _mutate_data_config(config, section, key, value)
+
+    run = baseline_cli.run_baseline(config, dependencies=_fake_dependencies([]))
+
+    persisted = yaml.safe_load(run.joinpath("config.yaml").read_text(encoding="utf-8"))
+    assert persisted["run_type"] == "smoke"
+    assert baseline_cli.is_final_run_config(persisted) is False
+    assert not (config.parents[1] / "artifacts" / "metrics" / "baseline_summary.csv").exists()
+
+
+def test_schema_semantic_and_identity_mutation_is_rejected_before_publication(
+    tmp_path: Path,
+) -> None:
+    config = _project_config(tmp_path)
+    schema_path = config.parents[1] / "workspace" / "annotations" / "label_schema.yaml"
+    schema = yaml.safe_load(schema_path.read_text(encoding="utf-8"))
+    schema["binary"]["enabled"] = False
+    _write_yaml(schema_path, schema)
+
+    with pytest.raises(ValueError, match="schema semantics|schema identity"):
+        baseline_cli.run_baseline(config, dependencies=_fake_dependencies([]))
+
+    assert not (config.parents[1] / "experiments").exists()
+    assert not (config.parents[1] / "artifacts").exists()
+
+
+@pytest.mark.parametrize(
+    ("location", "key", "value"),
+    [
+        ("common", "amp", 1),
+        ("preprocessing", "preserve_aspect_ratio", 1),
+        ("augmentation", "horizontal_flip", 0),
+        ("loader", "pin_memory", 1),
+    ],
+)
+def test_bool_int_confusion_is_rejected_before_publication(
+    tmp_path: Path, location: str, key: str, value: object
+) -> None:
+    config = _project_config(tmp_path, **({key: value} if location == "common" else {}))
+    if location != "common":
+        _mutate_data_config(config, location, key, value)
+
+    with pytest.raises(ValueError, match=key):
+        baseline_cli.run_baseline(config, dependencies=_fake_dependencies([]))
+
+    assert not (config.parents[1] / "experiments").exists()
+    assert not (config.parents[1] / "artifacts").exists()
+
+
 def test_summary_update_replaces_model_seed_atomically_and_sorts(tmp_path: Path) -> None:
     destination = tmp_path / "baseline_summary.csv"
     base = {
@@ -693,6 +804,40 @@ def test_validator_rejects_tampered_embedded_data_metadata(tmp_path: Path) -> No
     _write_yaml(config_path, config)
 
     with pytest.raises(ValueError, match="complete final run|sanitized"):
+        baseline_cli.validate_phase5_artifacts(root)
+
+
+@pytest.mark.parametrize(
+    ("section", "key", "value"),
+    [
+        ("preprocessing", "normalize", "dataset"),
+        ("augmentation", "rotation_limit", 8),
+        ("loader", "sampling", "sequential"),
+        ("preprocessing", "preserve_aspect_ratio", 1),
+    ],
+)
+def test_validator_rejects_data_policy_and_bool_int_tampering(
+    tmp_path: Path, section: str, key: str, value: object
+) -> None:
+    root, runs = _four_final_runs(tmp_path)
+    config_path = runs["swin_tiny"] / "config.yaml"
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["data"][section][key] = value
+    _write_yaml(config_path, config)
+
+    with pytest.raises(ValueError, match="complete final run|final policy"):
+        baseline_cli.validate_phase5_artifacts(root)
+
+
+def test_validator_rejects_schema_digest_tampering(tmp_path: Path) -> None:
+    root, runs = _four_final_runs(tmp_path)
+    config_path = runs["swin_tiny"] / "config.yaml"
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    assert config["schema_sha256"] == baseline_cli.EXPECTED_SCHEMA_SHA256
+    config["schema_sha256"] = "0" * 64
+    _write_yaml(config_path, config)
+
+    with pytest.raises(ValueError, match="complete final run|final policy"):
         baseline_cli.validate_phase5_artifacts(root)
 
 

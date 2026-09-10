@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.metadata
 import itertools
 import json
@@ -107,11 +108,40 @@ FINAL_POLICY = {
     "gradient_clip_norm": 1.0,
     "seed": 42,
     "device": "cuda",
+    "allow_cpu_training": False,
     "pretrained": True,
     "limit_batches": None,
     "selection_split": "val",
     "selection_metric": "AUROC",
 }
+PREPROCESSING_POLICY = {
+    "preserve_aspect_ratio": True,
+    "pad_to_square": True,
+    "channels": 3,
+    "percentile_clipping": False,
+    "force_grayscale": True,
+    "pad_value": 0,
+    "normalize": "imagenet",
+}
+AUGMENTATION_POLICY = {
+    "horizontal_flip": False,
+    "vertical_flip": False,
+    "rotation_limit": 7,
+    "translate_limit": 0.03,
+    "scale_limit": 0.05,
+    "brightness_contrast_limit": 0.1,
+    "gamma_limit": [90, 110],
+    "gaussian_noise_std_range": [0.01, 0.03],
+    "clahe": False,
+}
+LOADER_POLICY = {
+    "batch_size": 8,
+    "num_workers": 0,
+    "pin_memory": True,
+    "persistent_workers": False,
+    "sampling": "shuffle",
+}
+EXPECTED_SCHEMA_SHA256 = "6248ff8274f5ad5d26d046f851d672f33390d0a8ef07d6c4b6a0eee11dcefe95"
 SPLIT_NAMES = ("fit_train", "calibration", "val", "test")
 NESTED_DATA_KEYS = {
     "preprocessing": {
@@ -144,6 +174,7 @@ RECORD_CONFIG_KEYS = COMMON_CONFIG_KEYS | {
     "dataset_root",
     "split_dir",
     "schema_path",
+    "schema_sha256",
     "pretrained",
     "limit_batches",
     "smoke_overrides",
@@ -278,11 +309,119 @@ def _validate_data_config(data: Mapping[str, Any]) -> None:
         ):
             raise ValueError(f"{key} must be a non-empty list of strings")
 
+    preprocessing = data.get("preprocessing", {})
+    for key in (
+        "preserve_aspect_ratio",
+        "pad_to_square",
+        "percentile_clipping",
+        "force_grayscale",
+    ):
+        if key in preprocessing and type(preprocessing[key]) is not bool:
+            raise ValueError(f"{key} must be boolean")
+    if "channels" in preprocessing:
+        _positive_int(preprocessing, "channels")
+    if "pad_value" in preprocessing:
+        _finite_number(preprocessing, "pad_value", positive=False)
+    if "normalize" in preprocessing and (
+        not isinstance(preprocessing["normalize"], str) or not preprocessing["normalize"]
+    ):
+        raise ValueError("normalize must be a non-empty string")
+
+    augmentation = data.get("augmentation", {})
+    for key in ("horizontal_flip", "vertical_flip", "clahe"):
+        if key in augmentation and type(augmentation[key]) is not bool:
+            raise ValueError(f"{key} must be boolean")
+    for key in (
+        "rotation_limit",
+        "translate_limit",
+        "scale_limit",
+        "brightness_contrast_limit",
+    ):
+        if key in augmentation:
+            _finite_number(augmentation, key, positive=False)
+    for key in ("gamma_limit", "gaussian_noise_std_range"):
+        value = augmentation.get(key)
+        if value is not None and (
+            not isinstance(value, list)
+            or len(value) != 2
+            or any(isinstance(item, bool) or not isinstance(item, (int, float)) for item in value)
+        ):
+            raise ValueError(f"{key} must be a two-number list")
+
+    loader = data.get("loader", {})
+    if "batch_size" in loader:
+        _positive_int(loader, "batch_size")
+    if "num_workers" in loader and (
+        type(loader["num_workers"]) is not int or loader["num_workers"] < 0
+    ):
+        raise ValueError("num_workers must be a non-negative integer")
+    for key in ("pin_memory", "persistent_workers"):
+        if key in loader and type(loader[key]) is not bool:
+            raise ValueError(f"{key} must be boolean")
+    if "sampling" in loader and (
+        not isinstance(loader["sampling"], str) or not loader["sampling"]
+    ):
+        raise ValueError("sampling must be a non-empty string")
+
+
+def _strict_equal(actual: object, expected: object) -> bool:
+    if type(actual) is not type(expected):
+        return False
+    if isinstance(expected, dict):
+        return set(actual) == set(expected) and all(
+            _strict_equal(actual[key], value) for key, value in expected.items()
+        )
+    if isinstance(expected, list):
+        return len(actual) == len(expected) and all(
+            _strict_equal(item, expected_item)
+            for item, expected_item in zip(actual, expected, strict=True)
+        )
+    return actual == expected
+
+
+def _validate_schema_semantics(schema: Mapping[str, Any]) -> None:
+    binary = schema.get("binary")
+    if not isinstance(binary, Mapping) or not (
+        binary.get("enabled") is True
+        and binary.get("semantics_verified") is True
+        and _strict_equal(binary.get("classes"), {0: "normal", 1: "bone_tumour"})
+    ):
+        raise ValueError("label schema semantics do not match the verified binary task")
+    for section in ("subtype", "risk", "concepts"):
+        value = schema.get(section)
+        if not isinstance(value, Mapping) or value.get("enabled") is not False:
+            raise ValueError("label schema semantics enable unapproved optional supervision")
+    localization = schema.get("localization")
+    if not isinstance(localization, Mapping) or not (
+        localization.get("boxes_verified") is False
+        and localization.get("masks_verified") is False
+    ):
+        raise ValueError("label schema semantics enable unapproved spatial supervision")
+
+
+def _load_verified_schema(path: Path) -> tuple[dict[str, Any], str]:
+    contents = path.read_bytes()
+    payload = yaml.safe_load(contents)
+    if not isinstance(payload, dict):
+        raise ValueError("label schema must contain a YAML mapping")
+    _validate_schema_semantics(payload)
+    digest = hashlib.sha256(contents).hexdigest()
+    if digest != EXPECTED_SCHEMA_SHA256:
+        raise ValueError("label schema identity does not match the verified Phase 4 schema")
+    return payload, digest
+
 
 def is_final_run_config(config: Mapping[str, Any]) -> bool:
     """Return whether a sanitized run record matches the exact Phase 5 policy."""
-    return config.get("smoke_overrides") == {} and all(
-        config.get(key) == value for key, value in FINAL_POLICY.items()
+    data = config.get("data")
+    return bool(
+        config.get("smoke_overrides") == {}
+        and all(_strict_equal(config.get(key), value) for key, value in FINAL_POLICY.items())
+        and config.get("schema_sha256") == EXPECTED_SCHEMA_SHA256
+        and isinstance(data, Mapping)
+        and _strict_equal(data.get("preprocessing"), PREPROCESSING_POLICY)
+        and _strict_equal(data.get("augmentation"), AUGMENTATION_POLICY)
+        and _strict_equal(data.get("loader"), LOADER_POLICY)
     )
 
 
@@ -397,8 +536,12 @@ def resolve_config(
         raise ValueError("workspace_root must be the project workspace directory")
     schema_path = (project_root / str(data_config["schema_path"])).resolve()
     _require_within(schema_path, project_root, name="schema_path")
+    expected_schema_path = (workspace_root / "annotations" / "label_schema.yaml").resolve()
+    if schema_path != expected_schema_path:
+        raise ValueError("schema_path must be the canonical label_schema.yaml in workspace")
     if not schema_path.is_file():
         raise FileNotFoundError(f"Missing schema: {schema_path}")
+    schema, schema_sha256 = _load_verified_schema(schema_path)
     split_dir = (workspace_root / "splits").resolve()
     _require_within(split_dir, project_root, name="split_dir")
     for split in SPLIT_NAMES:
@@ -456,6 +599,7 @@ def resolve_config(
     record["dataset_root"] = _relative_path(dataset_root, project_root)
     record["split_dir"] = _relative_path(split_dir, project_root)
     record["schema_path"] = _relative_path(schema_path, project_root)
+    record["schema_sha256"] = schema_sha256
     record["pretrained"] = True if pretrained_override is None else pretrained_override
     record["limit_batches"] = limit_batches
     smoke_overrides: dict[str, object] = {}
@@ -500,6 +644,7 @@ def resolve_config(
         "dataset_root": str(dataset_root),
         "split_dir": str(split_dir),
         "schema_path": str(schema_path),
+        "schema": schema,
         "data": runtime_data,
     }
     return {"record": record, "runtime": runtime}
@@ -686,9 +831,8 @@ def run_baseline(
         _write_git_state(run_dir / "git_commit.txt", project_root)
         _write_notes(notes_path, record, status="Running", detail="Run initialized.")
         _set_reproducibility(int(record["seed"]))
-        schema = _load_yaml(Path(runtime["schema_path"]), name="label schema")
         data_module = dependencies.data_module_type(
-            Path(runtime["split_dir"]), runtime["data"], schema
+            Path(runtime["split_dir"]), runtime["data"], runtime["schema"]
         )
         data_module.setup()
         train_loader = _limit_loader(
