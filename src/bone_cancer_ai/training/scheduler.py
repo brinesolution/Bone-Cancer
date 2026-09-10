@@ -23,6 +23,11 @@ def build_scheduler(
     def multiplier(epoch_index: int) -> float:
         if warmup_epochs and epoch_index < warmup_epochs:
             return float((epoch_index + 1) / warmup_epochs)
+        if warmup_epochs == 0:
+            if total_epochs == 1:
+                return 1.0
+            progress = min(max(epoch_index / (total_epochs - 1), 0.0), 1.0)
+            return float(0.5 * (1.0 + math.cos(math.pi * progress)))
         decay_epochs = total_epochs - warmup_epochs
         if decay_epochs == 0:
             return 1.0

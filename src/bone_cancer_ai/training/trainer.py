@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 import math
+import random
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import torch
 import torch.nn.functional as functional
 from torch import nn
@@ -93,9 +95,9 @@ class BinaryTrainer:
                 early_stopping=self.early_stopping,
                 expected_model_alias=self.model_alias,
                 map_location=self.device,
+                expected_resolved_config=self.resolved_config,
+                expected_selection_metric=self.selection_metric,
             )
-            if metadata["resolved_config"] != self.resolved_config:
-                raise ValueError("resume checkpoint resolved configuration does not match")
             self.history = [dict(record) for record in metadata["history"]]
             self.start_epoch = int(metadata["epoch"]) + 1
 
@@ -131,6 +133,50 @@ class BinaryTrainer:
         if value < 0:
             raise ValueError(f"{key} must be non-negative")
         return value
+
+    @staticmethod
+    def _seed_dataset(dataset: object, seed: int, seen: set[int] | None = None) -> None:
+        if dataset is None:
+            return
+        seen = set() if seen is None else seen
+        if id(dataset) in seen:
+            return
+        seen.add(id(dataset))
+        transform = getattr(dataset, "transform", None)
+        set_seed = getattr(transform, "set_seed", None)
+        if callable(set_seed):
+            set_seed(seed)
+        BinaryTrainer._seed_dataset(getattr(dataset, "dataset", None), seed, seen)
+        for nested in getattr(dataset, "datasets", ()):
+            BinaryTrainer._seed_dataset(nested, seed, seen)
+
+    def _seed_epoch(self, loader: Iterable[Mapping[str, Any]], epoch: int) -> None:
+        workers = int(getattr(loader, "num_workers", 0) or 0)
+        if workers > 0 and bool(getattr(loader, "persistent_workers", False)):
+            raise ValueError(
+                "persistent_workers must be false so stochastic workers can be reseeded per epoch"
+            )
+        seed = (self.seed + epoch - 1) % (2**32)
+        random.seed(seed)
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(seed)
+
+        batch_sampler = getattr(loader, "batch_sampler", None)
+        owners = (
+            loader,
+            getattr(loader, "sampler", None),
+            batch_sampler,
+            getattr(batch_sampler, "sampler", None),
+        )
+        seeded_generators: set[int] = set()
+        for owner in owners:
+            generator = getattr(owner, "generator", None)
+            if isinstance(generator, torch.Generator) and id(generator) not in seeded_generators:
+                generator.manual_seed(seed)
+                seeded_generators.add(id(generator))
+        self._seed_dataset(getattr(loader, "dataset", None), seed)
 
     @staticmethod
     def _batch_size(images: torch.Tensor) -> int:
@@ -200,13 +246,13 @@ class BinaryTrainer:
             raise FloatingPointError("model produced non-finite logits")
         return logits
 
-    def _optimizer_step(self, pending_batches: int) -> float:
+    def _optimizer_step(self, valid_samples: int) -> float:
         self.scaler.unscale_(self.optimizer)
-        if pending_batches < self.accumulation_steps:
-            correction = self.accumulation_steps / pending_batches
-            for parameter in self.model.parameters():
-                if parameter.grad is not None:
-                    parameter.grad.mul_(correction)
+        if valid_samples < 1:
+            raise RuntimeError("optimizer step requires valid accumulated samples")
+        for parameter in self.model.parameters():
+            if parameter.grad is not None:
+                parameter.grad.div_(valid_samples)
         gradients = [
             parameter.grad
             for parameter in self.model.parameters()
@@ -235,6 +281,7 @@ class BinaryTrainer:
         rejected_samples = 0
         optimizer_steps = 0
         pending_batches = 0
+        pending_valid_samples = 0
         maximum_gradient_norm = 0.0
         for batch in loader:
             images, targets, _sample_ids, rejected = self._select_batch(batch)
@@ -243,32 +290,35 @@ class BinaryTrainer:
                 continue
             with autocast_context(self.device, self.amp_requested):
                 logits = self._normalize_logits(self.model(images), targets)
-                loss = functional.binary_cross_entropy_with_logits(
+                loss_sum = functional.binary_cross_entropy_with_logits(
                     logits,
                     targets,
                     pos_weight=self.pos_weight,
+                    reduction="sum",
                 )
-            if not bool(torch.isfinite(loss)):
+            if not bool(torch.isfinite(loss_sum)):
                 raise FloatingPointError("training produced a non-finite loss")
             count = int(targets.numel())
-            total_loss += float(loss.detach().cpu()) * count
+            total_loss += float(loss_sum.detach().cpu())
             valid_samples += count
-            self.scaler.scale(loss / self.accumulation_steps).backward()
+            self.scaler.scale(loss_sum).backward()
             pending_batches += 1
+            pending_valid_samples += count
             if pending_batches == self.accumulation_steps:
                 maximum_gradient_norm = max(
                     maximum_gradient_norm,
-                    self._optimizer_step(pending_batches),
+                    self._optimizer_step(pending_valid_samples),
                 )
                 optimizer_steps += 1
                 pending_batches = 0
+                pending_valid_samples = 0
         if valid_samples == 0:
             self.optimizer.zero_grad(set_to_none=True)
             raise ValueError("training epoch has no valid binary samples")
         if pending_batches:
             maximum_gradient_norm = max(
                 maximum_gradient_norm,
-                self._optimizer_step(pending_batches),
+                self._optimizer_step(pending_valid_samples),
             )
             optimizer_steps += 1
         return {
@@ -362,10 +412,8 @@ class BinaryTrainer:
     ) -> dict[str, Any]:
         """Fit using train/validation only and select strictly by validation AUROC."""
 
-        torch.manual_seed(self.seed)
-        if self.device.type == "cuda":
-            torch.cuda.manual_seed_all(self.seed)
         for epoch in range(self.start_epoch, self.epochs + 1):
+            self._seed_epoch(train_loader, epoch)
             learning_rate = float(self.optimizer.param_groups[0]["lr"])
             train_record = self._train_epoch(train_loader)
             _prediction, validation_record = self._validation_epoch(val_loader)
