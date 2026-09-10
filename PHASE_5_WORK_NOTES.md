@@ -1,6 +1,6 @@
 # Phase 5 Standard Comparison Baselines Work Notes
 
-**Status:** IDEA / PLAN / DESIGN complete; BUILD not started.
+**Status:** IDEA / PLAN / DESIGN complete; BUILD in progress.
 
 **Authoritative source:** `BONE_CANCER_10_PHASE_BUILD_DIRECTIVE.md`, Sections 10–12 and Phase 5. Detailed execution plan: `docs/superpowers/plans/2026-09-10-phase-5-baselines.md`.
 
@@ -19,7 +19,7 @@ Phase 5 establishes fair empirical reference models before HOSP-BoneNet is optim
 
 ## PLAN / phase loop
 
-- [ ] Task 1: registry, wrapper, configs, tests and four-model CUDA memory preflight.
+- [x] Task 1: registry, wrapper, configs, tests and four-model CUDA memory preflight.
 - [ ] Task 2: binary metrics, latency/report writers and tests.
 - [ ] Task 3: shared AMP trainer/checkpoints/early stopping and synthetic overfit tests.
 - [ ] Task 4: CLI, run bundles, summary aggregation and orchestration tests.
