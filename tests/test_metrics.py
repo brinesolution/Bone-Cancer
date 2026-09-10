@@ -6,6 +6,7 @@ import pandas as pd
 import pytest
 import torch
 
+from bone_cancer_ai.evaluation import reports as report_module
 from bone_cancer_ai.evaluation.classification import binary_classification_metrics
 from bone_cancer_ai.evaluation.reports import (
     atomic_write_csv,
@@ -58,6 +59,8 @@ def test_binary_metrics_match_hand_computed_imperfect_predictions():
     ):
         assert metrics[name] == pytest.approx(0.5)
     assert metrics["MCC"] == pytest.approx(0.0)
+    assert metrics["AUROC"] == pytest.approx(0.75)
+    assert metrics["AUPRC"] == pytest.approx(5 / 6)
     assert metrics["Brier"] == pytest.approx(0.185)
     assert metrics["ECE"] == pytest.approx(0.35)
 
@@ -82,6 +85,19 @@ def test_one_class_targets_use_none_for_undefined_metrics(targets, undefined_met
     assert metrics["confusion_matrix"] == (
         [[1, 2], [0, 0]] if targets[0] == 0 else [[0, 0], [1, 2]]
     )
+
+
+def test_all_negative_metrics_keep_undefined_values_json_safe():
+    metrics = binary_classification_metrics(
+        torch.tensor([-3.0, -2.0]),
+        torch.tensor([0, 0]),
+    )
+
+    assert metrics["AUPRC"] is None
+    assert metrics["precision"] is None
+    assert metrics["F1"] is None
+    assert metrics["MCC"] is None
+    json.dumps(metrics, allow_nan=False)
 
 
 @pytest.mark.parametrize(
@@ -137,6 +153,50 @@ def test_atomic_json_failure_preserves_existing_report(tmp_path):
     assert not list(tmp_path.glob("*.tmp"))
 
 
+def test_atomic_json_replace_failure_cleans_created_temporary(tmp_path, monkeypatch):
+    destination = tmp_path / "metrics.json"
+    atomic_write_json({"status": "original"}, destination)
+    temporary_paths = []
+
+    def fail_replace(source, target):
+        assert source.exists()
+        assert target == destination
+        temporary_paths.append(source)
+        raise OSError("replace failed")
+
+    monkeypatch.setattr(report_module.os, "replace", fail_replace)
+
+    with pytest.raises(OSError, match="replace failed"):
+        atomic_write_json({"status": "replacement"}, destination)
+
+    assert temporary_paths
+    assert all(not path.exists() for path in temporary_paths)
+    assert json.loads(destination.read_text(encoding="utf-8")) == {"status": "original"}
+
+
+def test_atomic_csv_serialization_failure_preserves_report_and_cleans_temporary(tmp_path):
+    temporary_paths = []
+
+    class UnserializableValue:
+        def __str__(self):
+            created = list(tmp_path.glob("*.tmp"))
+            assert created
+            temporary_paths.extend(created)
+            raise RuntimeError("csv serialization failed")
+
+    destination = tmp_path / "history.csv"
+    original = pd.DataFrame({"value": [1]})
+    atomic_write_csv(original, destination)
+
+    with pytest.raises(RuntimeError, match="csv serialization failed"):
+        atomic_write_csv(pd.DataFrame({"value": [UnserializableValue()]}), destination)
+
+    pd.testing.assert_frame_equal(pd.read_csv(destination), original)
+    assert temporary_paths
+    assert all(not path.exists() for path in temporary_paths)
+    assert not list(tmp_path.glob("*.tmp"))
+
+
 def test_cpu_latency_reports_elapsed_time_and_restores_training_state():
     class CountingModel(torch.nn.Module):
         def __init__(self):
@@ -183,6 +243,33 @@ def test_latency_restores_model_state_when_forward_fails():
         measure_inference_latency(model, torch.zeros(1), "cpu", warmup=1, repetitions=1)
 
     assert model.training is True
+
+
+@pytest.mark.parametrize("fail", [False, True])
+def test_latency_restores_exact_mixed_module_states(fail):
+    class MixedModeModel(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.batch_norm = torch.nn.BatchNorm1d(2)
+            self.fail = fail
+
+        def forward(self, value):
+            if self.fail:
+                raise RuntimeError("forward failed")
+            return self.batch_norm(value)
+
+    model = MixedModeModel()
+    model.train()
+    model.batch_norm.eval()
+
+    if fail:
+        with pytest.raises(RuntimeError, match="forward failed"):
+            measure_inference_latency(model, torch.zeros(2, 2), "cpu", warmup=1, repetitions=1)
+    else:
+        measure_inference_latency(model, torch.zeros(2, 2), "cpu", warmup=1, repetitions=1)
+
+    assert model.training is True
+    assert model.batch_norm.training is False
 
 
 @pytest.mark.parametrize(

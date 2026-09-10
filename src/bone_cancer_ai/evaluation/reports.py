@@ -83,9 +83,9 @@ def measure_inference_latency(
         raise RuntimeError("CUDA latency requested but CUDA is unavailable")
 
     example = example.to(resolved_device)
-    was_training = model.training
-    model.eval()
+    module_training_states = [(module, module.training) for module in model.modules()]
     try:
+        model.eval()
         with torch.inference_mode():
             for _ in range(warmup):
                 model(example)
@@ -98,7 +98,8 @@ def measure_inference_latency(
                 torch.cuda.synchronize(resolved_device)
             elapsed_ms = (time.perf_counter() - started) * 1_000.0
     finally:
-        model.train(was_training)
+        for module, training in module_training_states:
+            module.training = training
 
     return {
         "device": str(resolved_device),
