@@ -212,6 +212,11 @@ def _validate_optimizer_state(
             )
         ):
             raise ValueError("checkpoint optimizer betas are malformed")
+        for key, current_value in current_group.items():
+            if key not in {"lr", "params"} and loaded_group[key] != current_value:
+                raise ValueError(
+                    f"checkpoint optimizer parameter group field {key!r} does not match"
+                )
         loaded_parameters = loaded_group.get("params")
         if not isinstance(loaded_parameters, list) or len(loaded_parameters) != len(
             current_group["params"]
@@ -289,14 +294,23 @@ def _validate_scheduler_state(
     base_lrs = scheduler_state.get("base_lrs")
     last_lrs = scheduler_state.get("_last_lr")
     target_base_lrs = scheduler.state_dict().get("base_lrs")
+    lr_functions = getattr(scheduler, "lr_lambdas", None)
     if not all(isinstance(values, list) for values in (loaded_groups, base_lrs, last_lrs)):
         raise ValueError("checkpoint scheduler learning-rate state is malformed")
-    if not isinstance(target_base_lrs, list) or not (
+    if not isinstance(target_base_lrs, list) or not isinstance(lr_functions, list) or not (
         len(loaded_groups) == len(base_lrs) == len(last_lrs) == len(target_base_lrs)
+        == len(lr_functions)
     ):
         raise ValueError("checkpoint scheduler learning-rate groups do not match")
-    for index, (group, base_lr, last_lr, target_base_lr) in enumerate(
-        zip(loaded_groups, base_lrs, last_lrs, target_base_lrs, strict=True)
+    for index, (group, base_lr, last_lr, target_base_lr, lr_function) in enumerate(
+        zip(
+            loaded_groups,
+            base_lrs,
+            last_lrs,
+            target_base_lrs,
+            lr_functions,
+            strict=True,
+        )
     ):
         if not isinstance(group, Mapping):
             raise ValueError("checkpoint optimizer parameter group is malformed")
@@ -309,10 +323,19 @@ def _validate_scheduler_state(
             group.get("initial_lr"), name=f"optimizer initial LR {index}"
         )
         optimizer_last = _finite_rate(group.get("lr"), name=f"optimizer LR {index}")
+        if not callable(lr_function):
+            raise ValueError("live scheduler does not expose a callable learning-rate schedule")
+        expected_last = _finite_rate(
+            target_base * float(lr_function(checkpoint_epoch)),
+            name=f"expected scheduler last LR {index}",
+        )
         if base != target_base or base != optimizer_base:
             raise ValueError("checkpoint scheduler base learning rate does not match")
-        if last != optimizer_last:
-            raise ValueError("checkpoint optimizer and scheduler learning rates do not match")
+        if not (
+            math.isclose(last, optimizer_last, rel_tol=1e-12, abs_tol=0.0)
+            and math.isclose(last, expected_last, rel_tol=1e-12, abs_tol=0.0)
+        ):
+            raise ValueError("checkpoint dynamic learning rate does not match live schedule")
 
 
 def save_checkpoint(

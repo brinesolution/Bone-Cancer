@@ -62,6 +62,8 @@ class BinaryTrainer:
         self.model = model.to(self.device)
         self.model_alias = model_alias
         self.checkpoint_dir = Path(checkpoint_dir)
+        self.best_checkpoint_path = self.checkpoint_dir / "best.pt"
+        self.last_checkpoint_path = self.checkpoint_dir / "last.pt"
 
         weight = torch.as_tensor(pos_weight, dtype=torch.float32)
         if weight.ndim != 0 or not bool(torch.isfinite(weight)) or float(weight) <= 0:
@@ -86,8 +88,17 @@ class BinaryTrainer:
         self.history: list[dict[str, int | float]] = []
         self.start_epoch = 1
         if resume_from is not None:
+            resume_path = Path(resume_from)
+            existing_best = resume_path.parent / "best.pt"
+            existing_last = resume_path.parent / "last.pt"
+            if not existing_best.is_file() or not existing_last.is_file():
+                raise FileNotFoundError(
+                    "resume checkpoint directory must contain existing best.pt and last.pt"
+                )
+            self.best_checkpoint_path = existing_best
+            self.last_checkpoint_path = existing_last
             metadata = load_checkpoint(
-                Path(resume_from),
+                resume_path,
                 model=self.model,
                 optimizer=self.optimizer,
                 scheduler=self.scheduler,
@@ -390,8 +401,9 @@ class BinaryTrainer:
         }
 
     def _save(self, filename: str, *, epoch: int, selection_value: float) -> None:
+        destination = self.checkpoint_dir / filename
         save_checkpoint(
-            self.checkpoint_dir / filename,
+            destination,
             model=self.model,
             optimizer=self.optimizer,
             scheduler=self.scheduler,
@@ -404,6 +416,10 @@ class BinaryTrainer:
             resolved_config=self.resolved_config,
             history=self.history,
         )
+        if filename == "best.pt":
+            self.best_checkpoint_path = destination
+        elif filename == "last.pt":
+            self.last_checkpoint_path = destination
 
     def fit(
         self,
@@ -445,6 +461,6 @@ class BinaryTrainer:
             "history": [dict(record) for record in self.history],
             "best_epoch": self.early_stopping.best_epoch,
             "best_AUROC": self.early_stopping.best_value,
-            "best_checkpoint": str(self.checkpoint_dir / "best.pt"),
-            "last_checkpoint": str(self.checkpoint_dir / "last.pt"),
+            "best_checkpoint": str(self.best_checkpoint_path),
+            "last_checkpoint": str(self.last_checkpoint_path),
         }

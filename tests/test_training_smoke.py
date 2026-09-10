@@ -422,6 +422,11 @@ def test_checkpoint_config_is_validated_before_any_state_mutation(tmp_path: Path
         "optimizer_group_schema",
         "optimizer_group_type",
         "optimizer_group_value",
+        "coordinated_lr",
+        "finite_weight_decay",
+        "finite_betas",
+        "finite_eps",
+        "optimizer_flag",
     ],
 )
 def test_malformed_checkpoint_leaves_all_supplied_state_unchanged(
@@ -446,8 +451,19 @@ def test_malformed_checkpoint_leaves_all_supplied_state_unchanged(
         del payload["optimizer_state"]["param_groups"][0]["betas"]
     elif corruption == "optimizer_group_type":
         payload["optimizer_state"]["param_groups"][0]["betas"] = [0.9, 0.999]
-    else:
+    elif corruption == "optimizer_group_value":
         payload["optimizer_state"]["param_groups"][0]["weight_decay"] = float("nan")
+    elif corruption == "coordinated_lr":
+        payload["optimizer_state"]["param_groups"][0]["lr"] = 0.004
+        payload["scheduler_state"]["_last_lr"][0] = 0.004
+    elif corruption == "finite_weight_decay":
+        payload["optimizer_state"]["param_groups"][0]["weight_decay"] = 0.25
+    elif corruption == "finite_betas":
+        payload["optimizer_state"]["param_groups"][0]["betas"] = (0.8, 0.99)
+    elif corruption == "finite_eps":
+        payload["optimizer_state"]["param_groups"][0]["eps"] = 1e-6
+    else:
+        payload["optimizer_state"]["param_groups"][0]["maximize"] = True
     malformed = tmp_path / f"{corruption}.pt"
     torch.save(payload, malformed)
     model, optimizer, scheduler, scaler, stopping = _checkpoint_target_state()
@@ -763,6 +779,35 @@ def test_resume_from_terminal_early_stopping_checkpoint_does_not_read_loaders(
     _assert_nested_state_equal(resumed.model.state_dict(), before)
 
 
+def test_terminal_resume_from_another_directory_reports_existing_checkpoint_paths(
+    tmp_path: Path,
+) -> None:
+    source_dir = tmp_path / "source-run"
+    completed = _trainer(source_dir, epochs=5, patience=2)
+    completed.fit(_train_batches(), _val_batches())
+    output_dir = tmp_path / "unused-new-run"
+    resumed = BinaryTrainer(
+        TinyBinaryModel(-9.0),
+        model_alias="densenet121",
+        resolved_config=_config(epochs=5, patience=2),
+        checkpoint_dir=output_dir,
+        pos_weight=1.0,
+        device="cpu",
+        resume_from=source_dir / "last.pt",
+    )
+
+    result = resumed.fit(
+        InterruptAfter(_train_batches(), complete_epochs=0),
+        InterruptAfter(_val_batches(), complete_epochs=0),
+    )
+
+    assert Path(result["best_checkpoint"]) == source_dir / "best.pt"
+    assert Path(result["last_checkpoint"]) == source_dir / "last.pt"
+    assert Path(result["best_checkpoint"]).is_file()
+    assert Path(result["last_checkpoint"]).is_file()
+    assert not output_dir.exists()
+
+
 def test_resume_matches_uninterrupted_stochastic_model_and_shuffled_loader(
     tmp_path: Path,
 ) -> None:
@@ -826,10 +871,11 @@ def test_phase3_radiograph_transform_replays_after_epoch_reseed() -> None:
     transform.set_seed(314)
     first = transform(image=image, mask=mask)
     transform.set_seed(2718)
-    transform(image=image, mask=mask)
+    different = transform(image=image, mask=mask)
     transform.set_seed(314)
     replayed = transform(image=image, mask=mask)
 
+    assert not torch.equal(different["image"], first["image"])
     assert torch.equal(replayed["image"], first["image"])
     assert torch.equal(replayed["mask"], first["mask"])
 
