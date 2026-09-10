@@ -412,6 +412,8 @@ class BinaryTrainer:
     ) -> dict[str, Any]:
         """Fit using train/validation only and select strictly by validation AUROC."""
 
+        if self.early_stopping.bad_epochs >= self.early_stopping.patience:
+            return self._fit_result()
         for epoch in range(self.start_epoch, self.epochs + 1):
             self._seed_epoch(train_loader, epoch)
             learning_rate = float(self.optimizer.param_groups[0]["lr"])
@@ -434,6 +436,9 @@ class BinaryTrainer:
                 self._save("best.pt", epoch=epoch, selection_value=selection_value)
             if should_stop:
                 break
+        return self._fit_result()
+
+    def _fit_result(self) -> dict[str, Any]:
         if self.early_stopping.best_epoch is None or self.early_stopping.best_value is None:
             raise RuntimeError("training completed without a selected validation checkpoint")
         return {

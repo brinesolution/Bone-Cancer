@@ -16,6 +16,7 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader, Dataset
 
+from bone_cancer_ai.data.transforms import RadiographTransform
 from bone_cancer_ai.training.callbacks import EarlyStopping
 from bone_cancer_ai.training.checkpointing import load_checkpoint, save_checkpoint
 from bone_cancer_ai.training.optimizer import build_optimizer, class_weight_from_frame
@@ -253,6 +254,10 @@ def test_checkpoint_alias_is_validated_before_model_state_mutation(tmp_path: Pat
     source = TinyBinaryModel(1.25)
     optimizer = build_optimizer(source, learning_rate=0.01, weight_decay=0.0)
     scheduler = build_scheduler(optimizer, total_epochs=3, warmup_epochs=1)
+    source.weight.grad = torch.zeros_like(source.weight)
+    optimizer.step()
+    optimizer.zero_grad(set_to_none=True)
+    scheduler.step()
     scaler = torch.amp.GradScaler("cpu", enabled=False)
     stopping = EarlyStopping(patience=2)
     stopping.step(0.75, epoch=1)
@@ -305,7 +310,7 @@ def _checkpoint_target_state() -> tuple[
     EarlyStopping,
 ]:
     model = TinyBinaryModel(-4.0)
-    optimizer = build_optimizer(model, learning_rate=0.02, weight_decay=0.0)
+    optimizer = build_optimizer(model, learning_rate=0.01, weight_decay=0.0)
     model.weight.grad = torch.tensor(0.25)
     optimizer.step()
     optimizer.zero_grad(set_to_none=True)
@@ -355,10 +360,11 @@ def _assert_nested_state_equal(actual: object, expected: object) -> None:
 def _saved_checkpoint(tmp_path: Path) -> tuple[Path, dict[str, Any]]:
     source = TinyBinaryModel(1.25)
     optimizer = build_optimizer(source, learning_rate=0.01, weight_decay=0.0)
+    scheduler = build_scheduler(optimizer, total_epochs=3, warmup_epochs=1)
     source.weight.grad = torch.tensor(0.25)
     optimizer.step()
     optimizer.zero_grad(set_to_none=True)
-    scheduler = build_scheduler(optimizer, total_epochs=3, warmup_epochs=1)
+    scheduler.step()
     scaler = torch.amp.GradScaler("cpu", enabled=False)
     stopping = EarlyStopping(patience=2)
     stopping.step(0.75, epoch=1)
@@ -411,6 +417,11 @@ def test_checkpoint_config_is_validated_before_any_state_mutation(tmp_path: Path
         "optimizer_parameters",
         "optimizer_moment",
         "scheduler_rates",
+        "optimizer_lr",
+        "scheduler_epoch",
+        "optimizer_group_schema",
+        "optimizer_group_type",
+        "optimizer_group_value",
     ],
 )
 def test_malformed_checkpoint_leaves_all_supplied_state_unchanged(
@@ -425,8 +436,18 @@ def test_malformed_checkpoint_leaves_all_supplied_state_unchanged(
     elif corruption == "optimizer_moment":
         parameter_id = payload["optimizer_state"]["param_groups"][0]["params"][0]
         payload["optimizer_state"]["state"][parameter_id]["exp_avg"] = torch.zeros(2)
-    else:
+    elif corruption == "scheduler_rates":
         payload["scheduler_state"]["base_lrs"] = []
+    elif corruption == "optimizer_lr":
+        payload["optimizer_state"]["param_groups"][0]["lr"] = 0.004
+    elif corruption == "scheduler_epoch":
+        payload["scheduler_state"]["last_epoch"] = 2
+    elif corruption == "optimizer_group_schema":
+        del payload["optimizer_state"]["param_groups"][0]["betas"]
+    elif corruption == "optimizer_group_type":
+        payload["optimizer_state"]["param_groups"][0]["betas"] = [0.9, 0.999]
+    else:
+        payload["optimizer_state"]["param_groups"][0]["weight_decay"] = float("nan")
     malformed = tmp_path / f"{corruption}.pt"
     torch.save(payload, malformed)
     model, optimizer, scheduler, scaler, stopping = _checkpoint_target_state()
@@ -448,6 +469,31 @@ def test_malformed_checkpoint_leaves_all_supplied_state_unchanged(
     _assert_nested_state_equal(
         _training_state(model, optimizer, scheduler, scaler, stopping), before
     )
+
+
+def test_valid_decayed_checkpoint_restores_optimizer_and_scheduler_state(
+    tmp_path: Path,
+) -> None:
+    checkpoint, config = _saved_checkpoint(tmp_path)
+    model, optimizer, scheduler, scaler, stopping = _checkpoint_target_state()
+
+    metadata = load_checkpoint(
+        checkpoint,
+        model=model,
+        optimizer=optimizer,
+        scheduler=scheduler,
+        scaler=scaler,
+        early_stopping=stopping,
+        expected_model_alias="densenet121",
+        expected_resolved_config=config,
+        expected_selection_metric="AUROC",
+        map_location="cpu",
+    )
+
+    assert metadata["epoch"] == 1
+    assert scheduler.last_epoch == 1
+    assert optimizer.param_groups[0]["lr"] == pytest.approx(0.005)
+    assert scheduler.get_last_lr() == pytest.approx([0.005])
 
 
 def test_fit_accumulates_partial_window_clips_updates_and_writes_best_last(
@@ -690,6 +736,33 @@ def test_resume_restores_history_scheduler_optimizer_and_early_stopping(tmp_path
     assert torch.equal(resumed.model.weight.detach(), uninterrupted.model.weight.detach())
 
 
+def test_resume_from_terminal_early_stopping_checkpoint_does_not_read_loaders(
+    tmp_path: Path,
+) -> None:
+    run_dir = tmp_path / "terminal"
+    completed = _trainer(run_dir, epochs=5, patience=2)
+    completed_result = completed.fit(_train_batches(), _val_batches())
+    resumed = BinaryTrainer(
+        TinyBinaryModel(-9.0),
+        model_alias="densenet121",
+        resolved_config=_config(epochs=5, patience=2),
+        checkpoint_dir=run_dir,
+        pos_weight=1.0,
+        device="cpu",
+        resume_from=run_dir / "last.pt",
+    )
+    train = InterruptAfter(_train_batches(), complete_epochs=0)
+    validation = InterruptAfter(_val_batches(), complete_epochs=0)
+    before = deepcopy(resumed.model.state_dict())
+
+    resumed_result = resumed.fit(train, validation)
+
+    assert resumed_result == completed_result
+    assert train.iterations == 0
+    assert validation.iterations == 0
+    _assert_nested_state_equal(resumed.model.state_dict(), before)
+
+
 def test_resume_matches_uninterrupted_stochastic_model_and_shuffled_loader(
     tmp_path: Path,
 ) -> None:
@@ -741,6 +814,24 @@ def test_fit_rejects_persistent_workers_that_cannot_be_reseeded_each_epoch(
 
     with pytest.raises(ValueError, match="persistent_workers"):
         trainer.fit(PersistentWorkerLoader(), _val_batches())
+
+
+def test_phase3_radiograph_transform_replays_after_epoch_reseed() -> None:
+    image = np.tile(np.arange(40, dtype=np.uint8), (32, 1))[..., None]
+    image = np.repeat(image, 3, axis=2)
+    mask = np.zeros((32, 40), dtype=np.uint8)
+    mask[8:24, 10:30] = 1
+    transform = RadiographTransform(32, train=True, seed=1, normalize=False)
+
+    transform.set_seed(314)
+    first = transform(image=image, mask=mask)
+    transform.set_seed(2718)
+    transform(image=image, mask=mask)
+    transform.set_seed(314)
+    replayed = transform(image=image, mask=mask)
+
+    assert torch.equal(replayed["image"], first["image"])
+    assert torch.equal(replayed["mask"], first["mask"])
 
 
 @pytest.mark.parametrize("operation", ["fit", "predict"])

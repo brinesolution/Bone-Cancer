@@ -186,6 +186,32 @@ def _validate_optimizer_state(
     ):
         if not isinstance(loaded_group, Mapping):
             raise ValueError("checkpoint optimizer parameter group is malformed")
+        if loaded_group.keys() != current_group.keys():
+            raise ValueError("checkpoint optimizer parameter group schema does not match")
+        for key, current_value in current_group.items():
+            if key != "params" and type(loaded_group[key]) is not type(current_value):
+                raise ValueError(
+                    f"checkpoint optimizer parameter group field {key!r} has the wrong type"
+                )
+        for key in ("lr", "eps", "weight_decay", "initial_lr"):
+            if key in loaded_group:
+                value = _finite_number(
+                    loaded_group[key], name=f"optimizer parameter group {key}"
+                )
+                if value < 0:
+                    raise ValueError(
+                        f"checkpoint optimizer parameter group {key!r} must be non-negative"
+                    )
+        betas = loaded_group.get("betas")
+        if (
+            not isinstance(betas, tuple)
+            or len(betas) != 2
+            or any(
+                not 0 <= _finite_number(beta, name="optimizer beta") < 1
+                for beta in betas
+            )
+        ):
+            raise ValueError("checkpoint optimizer betas are malformed")
         loaded_parameters = loaded_group.get("params")
         if not isinstance(loaded_parameters, list) or len(loaded_parameters) != len(
             current_group["params"]
@@ -194,19 +220,32 @@ def _validate_optimizer_state(
         for parameter_id, parameter in zip(
             loaded_parameters, live_group["params"], strict=True
         ):
+            if type(parameter_id) is not int:
+                raise ValueError("checkpoint optimizer parameter IDs must be integers")
             if parameter_id in parameter_ids:
                 raise ValueError("checkpoint optimizer parameter IDs must be unique")
             parameter_ids.add(parameter_id)
             parameter_state = loaded_state.get(parameter_id, {})
             if not isinstance(parameter_state, Mapping):
                 raise ValueError("checkpoint optimizer parameter state is malformed")
+            expected_state_names = {"step", "exp_avg", "exp_avg_sq"}
+            if bool(loaded_group["amsgrad"]):
+                expected_state_names.add("max_exp_avg_sq")
+            if parameter_state and set(parameter_state) != expected_state_names:
+                raise ValueError("checkpoint optimizer parameter state schema does not match")
             for state_name, value in parameter_state.items():
-                if (
-                    isinstance(value, torch.Tensor)
-                    and state_name != "step"
-                    and value.shape != parameter.shape
-                ):
+                if not isinstance(value, torch.Tensor) or not bool(torch.isfinite(value).all()):
+                    raise ValueError("checkpoint optimizer tensor state is malformed")
+                if state_name == "step":
+                    if value.numel() != 1:
+                        raise ValueError("checkpoint optimizer step state is malformed")
+                    step = float(value)
+                    if step < 0 or not step.is_integer():
+                        raise ValueError("checkpoint optimizer step state is malformed")
+                elif value.shape != parameter.shape or value.dtype != parameter.dtype:
                     raise ValueError("checkpoint optimizer tensor state is incompatible")
+    if any(type(parameter_id) is not int for parameter_id in loaded_state):
+        raise ValueError("checkpoint optimizer state IDs must be integers")
     if set(loaded_state) - parameter_ids:
         raise ValueError("checkpoint optimizer state contains unknown parameters")
 
@@ -222,6 +261,58 @@ def _validate_state_structure(
             not isinstance(loaded_value, list) or len(current_value) != len(loaded_value)
         ):
             raise ValueError(f"checkpoint {name} state {key!r} is incompatible")
+
+
+def _finite_rate(value: object, *, name: str) -> float:
+    rate = _finite_number(value, name=name)
+    if rate < 0:
+        raise ValueError(f"{name} must be non-negative")
+    return rate
+
+
+def _validate_scheduler_state(
+    scheduler: torch.optim.lr_scheduler.LRScheduler,
+    scheduler_state: Mapping[str, Any],
+    optimizer_state: Mapping[str, Any],
+    *,
+    checkpoint_epoch: int,
+) -> None:
+    _validate_state_structure(scheduler.state_dict(), scheduler_state, name="scheduler")
+    scheduler_epoch = scheduler_state.get("last_epoch")
+    if type(scheduler_epoch) is not int or scheduler_epoch != checkpoint_epoch:
+        raise ValueError("checkpoint scheduler epoch does not match checkpoint history")
+    step_count = scheduler_state.get("_step_count")
+    if type(step_count) is not int or step_count != checkpoint_epoch + 1:
+        raise ValueError("checkpoint scheduler step count does not match checkpoint history")
+
+    loaded_groups = optimizer_state.get("param_groups")
+    base_lrs = scheduler_state.get("base_lrs")
+    last_lrs = scheduler_state.get("_last_lr")
+    target_base_lrs = scheduler.state_dict().get("base_lrs")
+    if not all(isinstance(values, list) for values in (loaded_groups, base_lrs, last_lrs)):
+        raise ValueError("checkpoint scheduler learning-rate state is malformed")
+    if not isinstance(target_base_lrs, list) or not (
+        len(loaded_groups) == len(base_lrs) == len(last_lrs) == len(target_base_lrs)
+    ):
+        raise ValueError("checkpoint scheduler learning-rate groups do not match")
+    for index, (group, base_lr, last_lr, target_base_lr) in enumerate(
+        zip(loaded_groups, base_lrs, last_lrs, target_base_lrs, strict=True)
+    ):
+        if not isinstance(group, Mapping):
+            raise ValueError("checkpoint optimizer parameter group is malformed")
+        base = _finite_rate(base_lr, name=f"scheduler base LR {index}")
+        last = _finite_rate(last_lr, name=f"scheduler last LR {index}")
+        target_base = _finite_rate(
+            target_base_lr, name=f"expected scheduler base LR {index}"
+        )
+        optimizer_base = _finite_rate(
+            group.get("initial_lr"), name=f"optimizer initial LR {index}"
+        )
+        optimizer_last = _finite_rate(group.get("lr"), name=f"optimizer LR {index}")
+        if base != target_base or base != optimizer_base:
+            raise ValueError("checkpoint scheduler base learning rate does not match")
+        if last != optimizer_last:
+            raise ValueError("checkpoint optimizer and scheduler learning rates do not match")
 
 
 def save_checkpoint(
@@ -270,6 +361,15 @@ def save_checkpoint(
         expected_resolved_config=config_copy,
         expected_selection_metric=selection_metric,
     )
+    _validate_model_state(model, payload["model_state"])
+    _validate_optimizer_state(optimizer, payload["optimizer_state"])
+    _validate_scheduler_state(
+        scheduler,
+        payload["scheduler_state"],
+        payload["optimizer_state"],
+        checkpoint_epoch=epoch,
+    )
+    _validate_state_structure(scaler.state_dict(), payload["scaler_state"], name="scaler")
     destination.parent.mkdir(parents=True, exist_ok=True)
     temporary = destination.with_name(f".{destination.name}.{uuid4().hex}.tmp")
     try:
@@ -311,8 +411,11 @@ def load_checkpoint(
     if optimizer is not None:
         _validate_optimizer_state(optimizer, optimizer_state)
     if scheduler is not None:
-        _validate_state_structure(
-            scheduler.state_dict(), scheduler_state, name="scheduler"
+        _validate_scheduler_state(
+            scheduler,
+            scheduler_state,
+            optimizer_state,
+            checkpoint_epoch=metadata["epoch"],
         )
     if scaler is not None:
         _validate_state_structure(scaler.state_dict(), scaler_state, name="scaler")
