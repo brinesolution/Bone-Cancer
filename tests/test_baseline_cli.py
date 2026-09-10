@@ -33,6 +33,10 @@ def _project_config(tmp_path: Path, **common_updates: object) -> Path:
     root = tmp_path / "project"
     (root / "dataset" / "Main").mkdir(parents=True)
     (root / "workspace" / "splits").mkdir(parents=True)
+    for split in ("fit_train", "calibration", "val", "test"):
+        root.joinpath("workspace", "splits", f"{split}.csv").write_text(
+            f"assigned_split\n{split}\n", encoding="utf-8"
+        )
     _write_yaml(
         root / "workspace" / "annotations" / "label_schema.yaml",
         {"binary": {"enabled": True, "classes": {0: "normal", 1: "bone_tumour"}}},
@@ -117,16 +121,21 @@ def test_config_paths_are_relative_to_the_declaring_files_and_overrides_are_reco
     )
 
     root = config.parents[1].resolve()
-    assert resolved["project_root"] == str(root)
-    assert resolved["data_config_path"] == str((root / "configs" / "data.yaml").resolve())
-    assert resolved["split_dir"] == str((root / "workspace" / "splits").resolve())
-    assert resolved["schema_path"] == str(
+    runtime = resolved["runtime"]
+    record = resolved["record"]
+    assert runtime["project_root"] == str(root)
+    assert runtime["data_config_path"] == str((root / "configs" / "data.yaml").resolve())
+    assert runtime["split_dir"] == str((root / "workspace" / "splits").resolve())
+    assert runtime["schema_path"] == str(
         (root / "workspace" / "annotations" / "label_schema.yaml").resolve()
     )
-    assert resolved["epochs"] == 2
-    assert resolved["pretrained"] is False
-    assert resolved["limit_batches"] == 1
-    assert resolved["smoke_overrides"] == {
+    assert record["model_config"] == "configs/baseline_densenet121.yaml"
+    assert record["data_config"] == "configs/data.yaml"
+    assert record["split_dir"] == "workspace/splits"
+    assert record["epochs"] == 2
+    assert record["pretrained"] is False
+    assert record["limit_batches"] == 1
+    assert record["smoke_overrides"] == {
         "epochs": 2,
         "pretrained": False,
         "limit_batches": 1,
@@ -134,7 +143,7 @@ def test_config_paths_are_relative_to_the_declaring_files_and_overrides_are_reco
 
 
 def test_default_config_is_a_cuda_amp_pretrained_full_run(tmp_path: Path) -> None:
-    resolved = baseline_cli.resolve_config(_project_config(tmp_path))
+    resolved = baseline_cli.resolve_config(_project_config(tmp_path))["record"]
 
     assert resolved["device"] == "cuda"
     assert resolved["amp"] is True
@@ -142,6 +151,78 @@ def test_default_config_is_a_cuda_amp_pretrained_full_run(tmp_path: Path) -> Non
     assert resolved["limit_batches"] is None
     assert resolved["epochs"] == 40
     assert resolved["smoke_overrides"] == {}
+
+
+@pytest.mark.parametrize("missing_key", ["project_root", "dataset_root", "schema_path"])
+def test_data_config_requires_boundary_paths(tmp_path: Path, missing_key: str) -> None:
+    config = _project_config(tmp_path)
+    data_path = config.parent / "data.yaml"
+    data = yaml.safe_load(data_path.read_text(encoding="utf-8"))
+    del data[missing_key]
+    _write_yaml(data_path, data)
+
+    with pytest.raises(ValueError, match=missing_key):
+        baseline_cli.resolve_config(config)
+
+
+@pytest.mark.parametrize(
+    ("data_update", "message"),
+    [
+        ({"project_root": "../.."}, "project_root"),
+        ({"dataset_root": "dataset"}, "dataset/Main"),
+        ({"schema_path": "../outside.yaml"}, "schema_path"),
+        ({"project_root": ["not", "a", "path"]}, "project_root"),
+        ({"loader": "not-a-mapping"}, "loader"),
+        ({"api_token": "secret-value"}, "unknown data config"),
+    ],
+)
+def test_data_config_rejects_unsafe_boundaries_types_and_unknown_keys(
+    tmp_path: Path, data_update: dict[str, object], message: str
+) -> None:
+    config = _project_config(tmp_path)
+    data_path = config.parent / "data.yaml"
+    data = yaml.safe_load(data_path.read_text(encoding="utf-8"))
+    data.update(data_update)
+    _write_yaml(data_path, data)
+
+    with pytest.raises((TypeError, ValueError), match=message):
+        baseline_cli.resolve_config(config)
+
+
+def test_resolved_record_omits_absolute_and_provenance_paths(tmp_path: Path) -> None:
+    config = _project_config(tmp_path)
+    data_path = config.parent / "data.yaml"
+    data = yaml.safe_load(data_path.read_text(encoding="utf-8"))
+    data["provenance"] = {
+        "patient_export": str(tmp_path / "private" / "patient-123"),
+    }
+    _write_yaml(data_path, data)
+
+    resolved = baseline_cli.resolve_config(config)
+    serialized = yaml.safe_dump(resolved["record"], sort_keys=False)
+
+    assert str(config.parents[1]) not in serialized
+    assert "patient-123" not in serialized
+    assert "provenance" not in serialized
+    for key in ("project_root", "dataset_root", "schema_path", "split_dir", "output_root"):
+        assert Path(resolved["runtime"][key]).is_absolute()
+
+
+@pytest.mark.parametrize("missing", ["schema", "fit_train", "calibration", "val", "test"])
+def test_config_resolution_requires_schema_and_all_workspace_splits(
+    tmp_path: Path, missing: str
+) -> None:
+    config = _project_config(tmp_path)
+    root = config.parents[1]
+    path = (
+        root / "workspace" / "annotations" / "label_schema.yaml"
+        if missing == "schema"
+        else root / "workspace" / "splits" / f"{missing}.csv"
+    )
+    path.unlink()
+
+    with pytest.raises(FileNotFoundError, match="schema|split"):
+        baseline_cli.resolve_config(config)
 
 
 def test_unknown_model_fails_in_a_real_subprocess_before_training(tmp_path: Path) -> None:
@@ -206,6 +287,7 @@ class _FakeTrainer:
         assert list(train_loader) == ["fit_train"]
         assert list(val_loader) == ["val"]
         self.events.append("fit")
+        self.model.weight.data.fill_(7.0)
         self.directory.joinpath("best.pt").write_bytes(b"best")
         self.directory.joinpath("last.pt").write_bytes(b"last")
         return {
@@ -217,8 +299,10 @@ class _FakeTrainer:
     def predict(self, loader):
         split = next(iter(loader))
         self.events.append(f"predict:{split}")
+        multiplier = 1.0 if split == "val" else 2.0
+        magnitude = float(self.model.weight.detach()) * multiplier
         return {
-            "logits": torch.tensor([-2.0, 2.0]),
+            "logits": torch.tensor([-magnitude, magnitude]),
             "targets": torch.tensor([0, 1]),
             "sample_ids": [f"{split}-a", f"{split}-b"],
             "valid_count": 2,
@@ -232,8 +316,34 @@ def _fake_dependencies(events: list[str]):
 
     def load_best(path, **kwargs):
         assert Path(path).name == "best.pt"
+        kwargs["model"].weight.data.fill_(2.0)
         events.append("load_best")
         return {"epoch": 1}
+
+    def metrics(logits, targets, threshold=0.5):
+        del targets, threshold
+        magnitude = float(torch.as_tensor(logits).abs().max())
+        if magnitude == 2.0:
+            score = 0.8
+        elif magnitude == 4.0:
+            score = 0.9
+        else:
+            raise AssertionError("predictions did not use the selected best checkpoint")
+        return {
+            "AUROC": score,
+            "AUPRC": score - 0.1,
+            "accuracy": score,
+            "balanced_accuracy": score,
+            "precision": score,
+            "recall": score,
+            "sensitivity": score,
+            "specificity": score,
+            "F1": score,
+            "MCC": score - 0.2,
+            "Brier": 1.0 - score,
+            "ECE": 1.0 - score,
+            "confusion_matrix": [[1, 0], [0, 1]],
+        }
 
     return baseline_cli.RunDependencies(
         data_module_type=_FakeDataModule,
@@ -242,21 +352,7 @@ def _fake_dependencies(events: list[str]):
         count_parameters=lambda model: 1,
         class_weight=lambda frame: torch.tensor(1.0),
         load_checkpoint=load_best,
-        metrics=lambda logits, targets, threshold=0.5: {
-            "AUROC": 1.0,
-            "AUPRC": 1.0,
-            "accuracy": 1.0,
-            "balanced_accuracy": 1.0,
-            "precision": 1.0,
-            "recall": 1.0,
-            "sensitivity": 1.0,
-            "specificity": 1.0,
-            "F1": 1.0,
-            "MCC": 1.0,
-            "Brier": 0.01,
-            "ECE": 0.01,
-            "confusion_matrix": [[1, 0], [0, 1]],
-        },
+        metrics=metrics,
         latency=lambda *args, **kwargs: {
             "device": "cuda",
             "warmup": 1,
@@ -307,13 +403,16 @@ def test_successful_runs_are_unique_complete_and_never_use_test_for_selection(
         "predict:test",
     ] * 2
     metrics = json.loads(first.joinpath("metrics.json").read_text(encoding="utf-8"))
-    assert metrics["validation"]["AUROC"] == 1.0
-    assert metrics["test"]["AUROC"] == 1.0
+    assert metrics["validation"]["AUROC"] == 0.8
+    assert metrics["test"]["AUROC"] == 0.9
     assert metrics["selection"] == {"split": "val", "metric": "AUROC", "threshold": 0.5}
     assert "test is evaluated once" in first.joinpath("notes.md").read_text(encoding="utf-8")
     summary = pd.read_csv(config.parents[1] / "artifacts" / "metrics" / "baseline_summary.csv")
     assert summary.columns.tolist() == report_module.BASELINE_SUMMARY_COLUMNS
     assert len(summary) == 1
+    assert summary.iloc[0]["AUROC"] == pytest.approx(0.9)
+    predictions = pd.read_csv(first / "test_predictions.csv")
+    assert predictions["logit"].tolist() == [-4.0, 4.0]
 
 
 def test_failed_run_records_status_without_metrics_or_summary_row(tmp_path: Path) -> None:
@@ -334,6 +433,23 @@ def test_failed_run_records_status_without_metrics_or_summary_row(tmp_path: Path
     assert "Status: Failed" in runs[0].joinpath("notes.md").read_text(encoding="utf-8")
     assert not runs[0].joinpath("metrics.json").exists()
     assert not (config.parents[1] / "artifacts" / "metrics" / "baseline_summary.csv").exists()
+
+
+def test_post_allocation_initialization_failure_is_recorded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = _project_config(tmp_path)
+
+    def fail_environment(path: Path) -> None:
+        del path
+        raise RuntimeError("synthetic environment failure")
+
+    monkeypatch.setattr(baseline_cli, "_write_environment", fail_environment)
+    with pytest.raises(RuntimeError, match="synthetic environment failure"):
+        baseline_cli.run_baseline(config, dependencies=_fake_dependencies([]))
+
+    run = next((config.parents[1] / "experiments" / "baselines" / "densenet121").iterdir())
+    assert "Status: Failed" in run.joinpath("notes.md").read_text(encoding="utf-8")
 
 
 def test_cuda_preflight_happens_before_a_run_directory_is_created(tmp_path: Path) -> None:
@@ -388,6 +504,40 @@ def test_smoke_run_is_recorded_only_in_its_bundle_not_the_final_summary(tmp_path
         "limit_batches": 1,
     }
     assert "Run type: smoke" in run.joinpath("notes.md").read_text(encoding="utf-8")
+    assert not (config.parents[1] / "artifacts" / "metrics" / "baseline_summary.csv").exists()
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("epochs", 20),
+        ("early_stopping_patience", 7),
+        ("image_size", 512),
+        ("batch_size", 4),
+        ("gradient_accumulation_steps", 2),
+        ("learning_rate", 0.0002),
+        ("weight_decay", 0.0002),
+        ("warmup_epochs", 1),
+        ("gradient_clip_norm", 2.0),
+        ("seed", 43),
+    ],
+)
+def test_valid_yaml_policy_deviation_is_marked_nonfinal(
+    tmp_path: Path, key: str, value: object
+) -> None:
+    record = baseline_cli.resolve_config(_project_config(tmp_path, **{key: value}))["record"]
+
+    assert record["run_type"] == "smoke"
+    assert baseline_cli.is_final_run_config(record) is False
+
+
+def test_valid_yaml_policy_deviation_cannot_publish_summary(tmp_path: Path) -> None:
+    config = _project_config(tmp_path, learning_rate=0.0002)
+
+    run = baseline_cli.run_baseline(config, dependencies=_fake_dependencies([]))
+
+    persisted = yaml.safe_load(run.joinpath("config.yaml").read_text(encoding="utf-8"))
+    assert persisted["run_type"] == "smoke"
     assert not (config.parents[1] / "artifacts" / "metrics" / "baseline_summary.csv").exists()
 
 
@@ -477,6 +627,88 @@ def test_phase5_validator_keeps_latest_final_when_a_newer_smoke_run_exists(
     )
 
     assert baseline_cli.validate_phase5_artifacts(first_config.parents[1])["status"] == "valid"
+
+
+def _four_final_runs(tmp_path: Path) -> tuple[Path, dict[str, Path]]:
+    first_config = _project_config(tmp_path)
+    runs = {}
+    for alias in ("densenet121", "efficientnet_b3", "convnext_tiny", "swin_tiny"):
+        config = first_config.parent / f"baseline_{alias}.yaml"
+        _write_yaml(config, {"model": alias, "common_config": "train.yaml"})
+        runs[alias] = baseline_cli.run_baseline(config, dependencies=_fake_dependencies([]))
+    return first_config.parents[1], runs
+
+
+def test_validator_rejects_stale_summary_instead_of_matching_an_older_run(
+    tmp_path: Path,
+) -> None:
+    root, runs = _four_final_runs(tmp_path)
+    config = root / "configs" / "baseline_densenet121.yaml"
+    newer = baseline_cli.run_baseline(config, dependencies=_fake_dependencies([]))
+    assert newer.name > runs["densenet121"].name
+    metrics = json.loads(newer.joinpath("metrics.json").read_text(encoding="utf-8"))
+    metrics["test"]["AUROC"] = 0.123
+    newer.joinpath("metrics.json").write_text(json.dumps(metrics), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="summary AUROC"):
+        baseline_cli.validate_phase5_artifacts(root)
+
+
+def test_validator_requires_nonempty_evidence_and_exact_complete_status(tmp_path: Path) -> None:
+    root, runs = _four_final_runs(tmp_path)
+    run = runs["swin_tiny"]
+    cases = [
+        ("environment.txt", ""),
+        ("git_commit.txt", ""),
+        ("notes.md", "Status: Running\n"),
+        ("notes.md", "Status: Complete\nStatus: Failed\n"),
+    ]
+    originals = {
+        name: run.joinpath(name).read_text(encoding="utf-8") for name, _ in cases
+    }
+    for name, bad_content in cases:
+        run.joinpath(name).write_text(bad_content, encoding="utf-8")
+        with pytest.raises(ValueError, match="complete final run|evidence|Status"):
+            baseline_cli.validate_phase5_artifacts(root)
+        run.joinpath(name).write_text(originals[name], encoding="utf-8")
+
+
+def test_validator_rejects_summary_link_to_nonfinal_bundle(tmp_path: Path) -> None:
+    root, runs = _four_final_runs(tmp_path)
+    config_path = runs["swin_tiny"] / "config.yaml"
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["learning_rate"] = 0.0002
+    config["run_type"] = "smoke"
+    _write_yaml(config_path, config)
+
+    with pytest.raises(ValueError, match="complete final run|final policy"):
+        baseline_cli.validate_phase5_artifacts(root)
+
+
+def test_validator_rejects_tampered_embedded_data_metadata(tmp_path: Path) -> None:
+    root, runs = _four_final_runs(tmp_path)
+    config_path = runs["swin_tiny"] / "config.yaml"
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["data"]["seed"] = 99
+    _write_yaml(config_path, config)
+
+    with pytest.raises(ValueError, match="complete final run|sanitized"):
+        baseline_cli.validate_phase5_artifacts(root)
+
+
+def test_persisted_run_config_contains_only_sanitized_relative_paths(tmp_path: Path) -> None:
+    config = _project_config(tmp_path)
+    data_path = config.parent / "data.yaml"
+    data = yaml.safe_load(data_path.read_text(encoding="utf-8"))
+    data["provenance"] = {"private_source": str(tmp_path / "patient-secret")}
+    _write_yaml(data_path, data)
+
+    run = baseline_cli.run_baseline(config, dependencies=_fake_dependencies([]))
+    persisted = run.joinpath("config.yaml").read_text(encoding="utf-8")
+
+    assert str(config.parents[1]) not in persisted
+    assert "patient-secret" not in persisted
+    assert "provenance" not in persisted
 
 
 def test_phase5_commands_expose_four_trainers_and_validation() -> None:

@@ -72,6 +72,84 @@ COMMON_CONFIG_KEYS = {
     "selection_split",
     "selection_metric",
 }
+DATA_CONFIG_KEYS = {
+    "project_root",
+    "dataset_root",
+    "source_read_only",
+    "workspace_root",
+    "artifacts_root",
+    "logs_root",
+    "schema_path",
+    "official_splits",
+    "image_extensions",
+    "image_size",
+    "seed",
+    "labels_verified",
+    "audit",
+    "provenance",
+    "split_policy",
+    "preprocessing",
+    "augmentation",
+    "loader",
+}
+FINAL_POLICY = {
+    "epochs": 40,
+    "early_stopping_patience": 8,
+    "image_size": 384,
+    "batch_size": 8,
+    "gradient_accumulation_steps": 1,
+    "optimizer": "adamw",
+    "learning_rate": 0.0001,
+    "weight_decay": 0.0001,
+    "scheduler": "cosine",
+    "warmup_epochs": 2,
+    "amp": True,
+    "gradient_clip_norm": 1.0,
+    "seed": 42,
+    "device": "cuda",
+    "pretrained": True,
+    "limit_batches": None,
+    "selection_split": "val",
+    "selection_metric": "AUROC",
+}
+SPLIT_NAMES = ("fit_train", "calibration", "val", "test")
+NESTED_DATA_KEYS = {
+    "preprocessing": {
+        "preserve_aspect_ratio",
+        "pad_to_square",
+        "channels",
+        "percentile_clipping",
+        "force_grayscale",
+        "pad_value",
+        "normalize",
+    },
+    "augmentation": {
+        "horizontal_flip",
+        "vertical_flip",
+        "rotation_limit",
+        "translate_limit",
+        "scale_limit",
+        "brightness_contrast_limit",
+        "gamma_limit",
+        "gaussian_noise_std_range",
+        "clahe",
+    },
+    "loader": {"batch_size", "num_workers", "pin_memory", "persistent_workers", "sampling"},
+}
+RECORD_CONFIG_KEYS = COMMON_CONFIG_KEYS | {
+    "model",
+    "project_root",
+    "model_config",
+    "common_config",
+    "dataset_root",
+    "split_dir",
+    "schema_path",
+    "pretrained",
+    "limit_batches",
+    "smoke_overrides",
+    "data",
+    "run_type",
+}
 
 
 @dataclass
@@ -130,7 +208,9 @@ def _load_yaml(path: Path, *, name: str) -> dict[str, Any]:
 
 
 def _resolve_declared_path(value: object, declaring_file: Path) -> Path:
-    path = Path(str(value))
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError("configured paths must be non-empty strings")
+    path = Path(value)
     return (path if path.is_absolute() else declaring_file.parent / path).resolve()
 
 
@@ -160,6 +240,96 @@ def _finite_number(config: Mapping[str, Any], key: str, *, positive: bool) -> fl
     return number
 
 
+def _relative_path(path: Path, root: Path) -> str:
+    return path.relative_to(root).as_posix() or "."
+
+
+def _validate_data_config(data: Mapping[str, Any]) -> None:
+    missing = {"project_root", "dataset_root", "schema_path"} - set(data)
+    if missing:
+        raise ValueError(f"data config is missing required keys: {sorted(missing)}")
+    unknown = set(data) - DATA_CONFIG_KEYS
+    if unknown:
+        raise ValueError(f"unknown data config keys: {sorted(unknown)}")
+    for key in ("project_root", "dataset_root", "schema_path"):
+        if not isinstance(data[key], str) or not data[key].strip():
+            raise ValueError(f"{key} must be a non-empty path string")
+    for key in ("workspace_root", "artifacts_root", "logs_root"):
+        if key in data and (not isinstance(data[key], str) or not data[key].strip()):
+            raise ValueError(f"{key} must be a non-empty path string")
+    for key in ("preprocessing", "augmentation", "loader", "audit", "provenance", "split_policy"):
+        if key in data and not isinstance(data[key], Mapping):
+            raise ValueError(f"{key} must be a mapping")
+    for key, allowed in NESTED_DATA_KEYS.items():
+        unknown_nested = set(data.get(key, {})) - allowed
+        if unknown_nested:
+            raise ValueError(f"unknown data config {key} keys: {sorted(unknown_nested)}")
+    for key in ("source_read_only", "labels_verified"):
+        if key in data and type(data[key]) is not bool:
+            raise ValueError(f"{key} must be boolean")
+    for key in ("image_size", "seed"):
+        if key in data and (type(data[key]) is not int or int(data[key]) <= 0):
+            raise ValueError(f"{key} must be a positive integer")
+    for key in ("official_splits", "image_extensions"):
+        if key in data and (
+            not isinstance(data[key], list)
+            or not data[key]
+            or any(not isinstance(value, str) or not value for value in data[key])
+        ):
+            raise ValueError(f"{key} must be a non-empty list of strings")
+
+
+def is_final_run_config(config: Mapping[str, Any]) -> bool:
+    """Return whether a sanitized run record matches the exact Phase 5 policy."""
+    return config.get("smoke_overrides") == {} and all(
+        config.get(key) == value for key, value in FINAL_POLICY.items()
+    )
+
+
+def _is_sanitized_run_record(config: Mapping[str, Any], alias: str) -> bool:
+    if set(config) != RECORD_CONFIG_KEYS:
+        return False
+    expected_paths = {
+        "project_root": ".",
+        "model_config": f"configs/baseline_{alias}.yaml",
+        "common_config": "configs/train.yaml",
+        "data_config": "configs/data.yaml",
+        "output_root": "experiments/baselines",
+        "dataset_root": "dataset/Main",
+        "split_dir": "workspace/splits",
+        "schema_path": "workspace/annotations/label_schema.yaml",
+    }
+    if any(config.get(key) != value for key, value in expected_paths.items()):
+        return False
+    data = config.get("data")
+    if not isinstance(data, Mapping) or set(data) != {
+        "dataset_root",
+        "image_size",
+        "seed",
+        "preprocessing",
+        "augmentation",
+        "loader",
+    }:
+        return False
+    if data.get("dataset_root") != "dataset/Main":
+        return False
+    if data.get("image_size") != config.get("image_size") or data.get("seed") != config.get(
+        "seed"
+    ):
+        return False
+    for key, allowed in NESTED_DATA_KEYS.items():
+        value = data.get(key)
+        if not isinstance(value, Mapping) or set(value) - allowed:
+            return False
+    loader = data["loader"]
+    if any(
+        loader.get(key) != config.get(key)
+        for key in ("batch_size", "num_workers", "pin_memory", "persistent_workers")
+    ):
+        return False
+    return True
+
+
 def resolve_config(
     model_config_path: Path,
     *,
@@ -170,11 +340,16 @@ def resolve_config(
     """Resolve and validate a model/common/data configuration chain."""
 
     model_path = Path(model_config_path).resolve()
+    if model_path.parent.name.casefold() != "configs":
+        raise ValueError("model config must be inside the project configs directory")
+    inferred_project_root = model_path.parent.parent.resolve()
     model_config = _load_yaml(model_path, name="model config")
     unknown_model_keys = set(model_config) - {"model", "common_config"}
     if unknown_model_keys:
         raise ValueError(f"unknown model config keys: {sorted(unknown_model_keys)}")
     model = model_config.get("model")
+    if not isinstance(model, str):
+        raise ValueError("model must be a string")
     if model not in APPROVED_MODELS:
         approved = ", ".join(APPROVED_MODELS)
         raise ValueError(f"Unknown baseline {model!r}; choose one of: {approved}")
@@ -186,12 +361,16 @@ def resolve_config(
     missing_common_keys = COMMON_CONFIG_KEYS - set(common)
     if missing_common_keys:
         raise ValueError(f"common config is missing keys: {sorted(missing_common_keys)}")
+    for key in ("data_config", "output_root"):
+        if not isinstance(common[key], str) or not common[key].strip():
+            raise ValueError(f"{key} must be a non-empty path string")
 
     data_path = _resolve_declared_path(common["data_config"], common_path)
     data_config = _load_yaml(data_path, name="data config")
-    if "project_root" not in data_config:
-        raise ValueError("data config must define project_root")
+    _validate_data_config(data_config)
     project_root = _resolve_declared_path(data_config["project_root"], data_path)
+    if project_root != inferred_project_root:
+        raise ValueError("project_root must match the model config project boundary")
     _require_within(model_path, project_root, name="model config")
     _require_within(common_path, project_root, name="common config")
     _require_within(data_path, project_root, name="data config")
@@ -201,17 +380,31 @@ def resolve_config(
     dataset_root = (project_root / str(data_config.get("dataset_root", ""))).resolve()
     _require_within(dataset_root, project_root, name="dataset_root")
     source_root = (project_root / "dataset" / "Main").resolve()
+    if dataset_root != source_root:
+        raise ValueError("dataset_root must be the project's immutable dataset/Main")
+    if not dataset_root.is_dir():
+        raise FileNotFoundError(f"Missing dataset_root: {dataset_root}")
     if output_root == source_root or output_root.is_relative_to(source_root):
         raise ValueError("output_root must not be inside dataset/Main")
     expected_output_root = (project_root / "experiments" / "baselines").resolve()
     if output_root != expected_output_root:
         raise ValueError("output_root must be experiments/baselines")
-    workspace_root = (project_root / str(data_config.get("workspace_root", "workspace"))).resolve()
+    workspace_value = data_config.get("workspace_root", "workspace")
+    workspace_root = (project_root / str(workspace_value)).resolve()
     _require_within(workspace_root, project_root, name="workspace_root")
-    schema_path = (project_root / str(data_config.get("schema_path", ""))).resolve()
+    expected_workspace = (project_root / "workspace").resolve()
+    if workspace_root != expected_workspace:
+        raise ValueError("workspace_root must be the project workspace directory")
+    schema_path = (project_root / str(data_config["schema_path"])).resolve()
     _require_within(schema_path, project_root, name="schema_path")
+    if not schema_path.is_file():
+        raise FileNotFoundError(f"Missing schema: {schema_path}")
     split_dir = (workspace_root / "splits").resolve()
     _require_within(split_dir, project_root, name="split_dir")
+    for split in SPLIT_NAMES:
+        split_path = split_dir / f"{split}.csv"
+        if not split_path.is_file():
+            raise FileNotFoundError(f"Missing split manifest: {split_path}")
 
     if common["device"] != "cuda":
         raise ValueError("device must be cuda for Phase 5 baselines")
@@ -228,9 +421,8 @@ def resolve_config(
             raise ValueError(f"{key} must be boolean")
     if common["amp"] is not True:
         raise ValueError("amp must be true")
-    if common["image_size"] != 384:
-        raise ValueError("image_size must remain 384")
     for key in (
+        "image_size",
         "batch_size",
         "epochs",
         "gradient_accumulation_steps",
@@ -254,50 +446,63 @@ def resolve_config(
     if limit_batches is not None and (type(limit_batches) is not int or limit_batches <= 0):
         raise ValueError("limit_batches must be a positive integer")
 
-    resolved = dict(common)
-    resolved["model"] = model
-    resolved["model_config_path"] = str(model_path)
-    resolved["common_config_path"] = str(common_path)
-    resolved["data_config_path"] = str(data_path)
-    resolved["project_root"] = str(project_root)
-    resolved["output_root"] = str(output_root)
-    resolved["dataset_root"] = str(dataset_root)
-    resolved["split_dir"] = str(split_dir)
-    resolved["schema_path"] = str(schema_path)
-    resolved["pretrained"] = True if pretrained_override is None else pretrained_override
-    resolved["limit_batches"] = limit_batches
+    record = dict(common)
+    record["model"] = model
+    record["project_root"] = "."
+    record["model_config"] = _relative_path(model_path, project_root)
+    record["common_config"] = _relative_path(common_path, project_root)
+    record["data_config"] = _relative_path(data_path, project_root)
+    record["output_root"] = _relative_path(output_root, project_root)
+    record["dataset_root"] = _relative_path(dataset_root, project_root)
+    record["split_dir"] = _relative_path(split_dir, project_root)
+    record["schema_path"] = _relative_path(schema_path, project_root)
+    record["pretrained"] = True if pretrained_override is None else pretrained_override
+    record["limit_batches"] = limit_batches
     smoke_overrides: dict[str, object] = {}
     if epochs_override is not None:
-        resolved["epochs"] = epochs_override
-        resolved["warmup_epochs"] = min(int(resolved["warmup_epochs"]), epochs_override)
+        record["epochs"] = epochs_override
+        record["warmup_epochs"] = min(int(record["warmup_epochs"]), epochs_override)
         smoke_overrides["epochs"] = epochs_override
     if pretrained_override is not None:
         smoke_overrides["pretrained"] = pretrained_override
     if limit_batches is not None:
         smoke_overrides["limit_batches"] = limit_batches
-    resolved["smoke_overrides"] = smoke_overrides
+    record["smoke_overrides"] = smoke_overrides
 
     loader = dict(data_config.get("loader", {}))
     loader.update(
         {
-            "batch_size": resolved["batch_size"],
-            "num_workers": resolved["num_workers"],
-            "pin_memory": resolved["pin_memory"],
-            "persistent_workers": resolved["persistent_workers"],
+            "batch_size": record["batch_size"],
+            "num_workers": record["num_workers"],
+            "pin_memory": record["pin_memory"],
+            "persistent_workers": record["persistent_workers"],
         }
     )
-    resolved_data = dict(data_config)
-    resolved_data.update(
-        {
-            "project_root": str(project_root),
-            "dataset_root": str(dataset_root),
-            "image_size": resolved["image_size"],
-            "seed": resolved["seed"],
-            "loader": loader,
-        }
-    )
-    resolved["data"] = resolved_data
-    return resolved
+    runtime_data = {
+        "dataset_root": str(dataset_root),
+        "image_size": record["image_size"],
+        "seed": record["seed"],
+        "preprocessing": dict(data_config.get("preprocessing", {})),
+        "augmentation": dict(data_config.get("augmentation", {})),
+        "loader": loader,
+    }
+    record["data"] = {
+        **runtime_data,
+        "dataset_root": _relative_path(dataset_root, project_root),
+    }
+    record["run_type"] = "final" if is_final_run_config(record) else "smoke"
+    runtime = {
+        "project_root": str(project_root),
+        "model_config_path": str(model_path),
+        "common_config_path": str(common_path),
+        "data_config_path": str(data_path),
+        "output_root": str(output_root),
+        "dataset_root": str(dataset_root),
+        "split_dir": str(split_dir),
+        "schema_path": str(schema_path),
+        "data": runtime_data,
+    }
+    return {"record": record, "runtime": runtime}
 
 
 class _LimitedLoader:
@@ -373,7 +578,7 @@ def _write_git_state(path: Path, project_root: Path) -> None:
 
 def _write_notes(path: Path, resolved: Mapping[str, Any], *, status: str, detail: str) -> None:
     overrides = resolved["smoke_overrides"]
-    run_kind = "smoke" if overrides else "final"
+    run_kind = resolved["run_type"]
     path.write_text(
         "\n".join(
             [
@@ -453,6 +658,8 @@ def run_baseline(
         pretrained_override=pretrained_override,
         limit_batches=limit_batches,
     )
+    record = resolved["record"]
+    runtime = resolved["runtime"]
     dependencies = dependencies or _default_dependencies()
     if not dependencies.cuda_available():
         raise RuntimeError("CUDA is required for Phase 5 baseline training and is unavailable")
@@ -467,42 +674,42 @@ def run_baseline(
         update_baseline_summary,
     )
 
-    project_root = Path(resolved["project_root"])
-    run_dir = _new_run_directory(Path(resolved["output_root"]), str(resolved["model"]))
+    project_root = Path(runtime["project_root"])
+    run_dir = _new_run_directory(Path(runtime["output_root"]), str(record["model"]))
     notes_path = run_dir / "notes.md"
-    run_dir.joinpath("config.yaml").write_text(
-        yaml.safe_dump(resolved, sort_keys=False), encoding="utf-8", newline="\n"
-    )
-    _write_environment(run_dir / "environment.txt")
-    _write_git_state(run_dir / "git_commit.txt", project_root)
-    _write_notes(notes_path, resolved, status="Running", detail="Run initialized.")
 
     try:
-        _set_reproducibility(int(resolved["seed"]))
-        schema = _load_yaml(Path(resolved["schema_path"]), name="label schema")
+        run_dir.joinpath("config.yaml").write_text(
+            yaml.safe_dump(record, sort_keys=False), encoding="utf-8", newline="\n"
+        )
+        _write_environment(run_dir / "environment.txt")
+        _write_git_state(run_dir / "git_commit.txt", project_root)
+        _write_notes(notes_path, record, status="Running", detail="Run initialized.")
+        _set_reproducibility(int(record["seed"]))
+        schema = _load_yaml(Path(runtime["schema_path"]), name="label schema")
         data_module = dependencies.data_module_type(
-            Path(resolved["split_dir"]), resolved["data"], schema
+            Path(runtime["split_dir"]), runtime["data"], schema
         )
         data_module.setup()
         train_loader = _limit_loader(
-            data_module.loader("fit_train"), resolved["limit_batches"]
+            data_module.loader("fit_train"), record["limit_batches"]
         )
-        val_loader = _limit_loader(data_module.loader("val"), resolved["limit_batches"])
-        test_loader = _limit_loader(data_module.loader("test"), resolved["limit_batches"])
+        val_loader = _limit_loader(data_module.loader("val"), record["limit_batches"])
+        test_loader = _limit_loader(data_module.loader("test"), record["limit_batches"])
         model = dependencies.create_model(
-            name=resolved["model"],
-            pretrained=resolved["pretrained"],
-            image_size=resolved["image_size"],
+            name=record["model"],
+            pretrained=record["pretrained"],
+            image_size=record["image_size"],
         )
         parameter_count = int(dependencies.count_parameters(model))
         pos_weight = dependencies.class_weight(data_module.frames["fit_train"])
         trainer = dependencies.trainer_type(
             model,
-            model_alias=resolved["model"],
-            resolved_config=resolved,
+            model_alias=record["model"],
+            resolved_config=record,
             checkpoint_dir=run_dir,
             pos_weight=pos_weight,
-            device=resolved["device"],
+            device=record["device"],
         )
         dependencies.cuda_reset_peak()
         fit_result = trainer.fit(train_loader, val_loader)
@@ -510,9 +717,9 @@ def run_baseline(
         dependencies.load_checkpoint(
             best_path,
             model=model,
-            expected_model_alias=resolved["model"],
-            map_location=resolved["device"],
-            expected_resolved_config=resolved,
+            expected_model_alias=record["model"],
+            map_location=record["device"],
+            expected_resolved_config=record,
             expected_selection_metric="AUROC",
         )
         validation_prediction = trainer.predict(val_loader)
@@ -525,8 +732,8 @@ def run_baseline(
         )
         latency = dependencies.latency(
             model,
-            torch.zeros(1, 3, int(resolved["image_size"]), int(resolved["image_size"])),
-            resolved["device"],
+            torch.zeros(1, 3, int(record["image_size"]), int(record["image_size"])),
+            record["device"],
         )
         resources = {
             "trainable_parameters": parameter_count,
@@ -535,6 +742,12 @@ def run_baseline(
             "latency": latency,
         }
         metrics_payload = {
+            "metadata": {
+                "model": record["model"],
+                "seed": record["seed"],
+                "run_type": record["run_type"],
+                "best_epoch": int(fit_result["best_epoch"]),
+            },
             "selection": {"split": "val", "metric": "AUROC", "threshold": 0.5},
             "validation": validation_metrics,
             "test": test_metrics,
@@ -555,16 +768,18 @@ def run_baseline(
         run_dir.joinpath("best_checkpoint_path.txt").write_text(
             "best.pt\n", encoding="utf-8", newline="\n"
         )
-        _write_notes(notes_path, resolved, status="Complete", detail="Artifacts are complete.")
+        _write_notes(notes_path, record, status="Complete", detail="Artifacts are complete.")
         summary_row = {
-            "model": resolved["model"],
-            "seed": resolved["seed"],
+            "model": record["model"],
+            "seed": record["seed"],
             "best_epoch": int(fit_result["best_epoch"]),
             **{column: test_metrics[column] for column in BASELINE_SUMMARY_COLUMNS[3:10]},
             "params": parameter_count,
             "latency_ms": latency["latency_ms"],
         }
-        if not resolved["smoke_overrides"]:
+        if is_final_run_config(record) and _is_sanitized_run_record(
+            record, str(record["model"])
+        ):
             update_baseline_summary(
                 project_root / "artifacts" / "metrics" / "baseline_summary.csv", summary_row
             )
@@ -575,12 +790,12 @@ def run_baseline(
             "to preserve effective batch size before considering a resolution change."
         )
         _remove_result_files(run_dir)
-        _write_notes(notes_path, resolved, status="Failed", detail=guidance)
+        _write_notes(notes_path, record, status="Failed", detail=guidance)
         raise torch.cuda.OutOfMemoryError(f"{error}. {guidance}") from error
     except Exception as error:
         _remove_result_files(run_dir)
         detail = f"{type(error).__name__}: {str(error).splitlines()[0][:500]}"
-        _write_notes(notes_path, resolved, status="Failed", detail=detail)
+        _write_notes(notes_path, record, status="Failed", detail=detail)
         raise
 
 
@@ -591,6 +806,29 @@ def _strict_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"), parse_constant=reject_constant)
 
 
+def _complete_final_candidate(run_dir: Path, alias: str, seed: int) -> bool:
+    present = {path.name for path in run_dir.iterdir() if path.is_file()}
+    if not REQUIRED_RUN_FILES <= present:
+        return False
+    try:
+        config = _load_yaml(run_dir / "config.yaml", name="resolved run config")
+        environment = run_dir.joinpath("environment.txt").read_text(encoding="utf-8").strip()
+        git_state = run_dir.joinpath("git_commit.txt").read_text(encoding="utf-8").strip()
+        note_lines = run_dir.joinpath("notes.md").read_text(encoding="utf-8").splitlines()
+    except (OSError, ValueError):
+        return False
+    return bool(
+        config.get("model") == alias
+        and config.get("seed") == seed
+        and config.get("run_type") == "final"
+        and _is_sanitized_run_record(config, alias)
+        and is_final_run_config(config)
+        and environment
+        and git_state
+        and [line for line in note_lines if line.startswith("Status:")] == ["Status: Complete"]
+    )
+
+
 def _validate_run_bundle(run_dir: Path, alias: str, summary_row: Any) -> None:
     import pandas as pd
 
@@ -599,19 +837,20 @@ def _validate_run_bundle(run_dir: Path, alias: str, summary_row: Any) -> None:
     if missing:
         raise ValueError(f"run {run_dir.name} is missing artifacts: {sorted(missing)}")
     config = _load_yaml(run_dir / "config.yaml", name="resolved run config")
-    if config.get("model") != alias or config.get("seed") != 42:
+    if config.get("model") != alias or config.get("seed") != int(summary_row["seed"]):
         raise ValueError(f"run {run_dir.name} has the wrong model or seed")
-    if config.get("smoke_overrides"):
-        raise ValueError(f"run {run_dir.name} contains a smoke override")
-    if not (
-        config.get("pretrained") is True
-        and config.get("device") == "cuda"
-        and config.get("amp") is True
-        and config.get("limit_batches") is None
+    if (
+        config.get("run_type") != "final"
+        or not _is_sanitized_run_record(config, alias)
+        or not is_final_run_config(config)
     ):
-        raise ValueError(f"run {run_dir.name} is not a final CUDA AMP pretrained run")
-    if config.get("selection_split") != "val" or config.get("selection_metric") != "AUROC":
-        raise ValueError(f"run {run_dir.name} contains test-selection violation evidence")
+        raise ValueError(f"run {run_dir.name} violates the exact final policy")
+    for evidence_name in ("environment.txt", "git_commit.txt"):
+        if not run_dir.joinpath(evidence_name).read_text(encoding="utf-8").strip():
+            raise ValueError(f"run {run_dir.name} has empty {evidence_name} evidence")
+    notes = run_dir.joinpath("notes.md").read_text(encoding="utf-8").splitlines()
+    if [line for line in notes if line.startswith("Status:")] != ["Status: Complete"]:
+        raise ValueError(f"run {run_dir.name} lacks exact Complete Status evidence")
     metrics = _strict_json(run_dir / "metrics.json")
     if not isinstance(metrics, dict) or metrics.get("selection") != {
         "split": "val",
@@ -622,6 +861,13 @@ def _validate_run_bundle(run_dir: Path, alias: str, summary_row: Any) -> None:
     for section in ("validation", "test", "resources"):
         if not isinstance(metrics.get(section), dict):
             raise ValueError(f"run {run_dir.name} has invalid metrics JSON")
+    if metrics.get("metadata") != {
+        "model": alias,
+        "seed": int(summary_row["seed"]),
+        "run_type": "final",
+        "best_epoch": int(summary_row["best_epoch"]),
+    }:
+        raise ValueError(f"run {run_dir.name} metrics metadata does not match the summary")
     history = pd.read_csv(run_dir / "history.csv")
     confusion = pd.read_csv(run_dir / "confusion_matrix.csv")
     predictions = pd.read_csv(run_dir / "test_predictions.csv")
@@ -687,17 +933,14 @@ def validate_phase5_artifacts(project_root: Path = PROJECT_ROOT) -> dict[str, ob
             if model_root.is_dir()
             else []
         )
-        validation_errors = []
-        for candidate in candidates:
-            try:
-                _validate_run_bundle(candidate, alias, row)
-            except (OSError, ValueError, KeyError) as error:
-                validation_errors.append(str(error))
-                continue
-            break
-        else:
-            detail = validation_errors[0] if validation_errors else "no run directory exists"
-            raise ValueError(f"no complete final run exists for {alias}: {detail}")
+        complete_final_runs = [
+            candidate
+            for candidate in candidates
+            if _complete_final_candidate(candidate, alias, int(row["seed"]))
+        ]
+        if not complete_final_runs:
+            raise ValueError(f"no complete final run exists for {alias}")
+        _validate_run_bundle(complete_final_runs[0], alias, row)
     return {"models": 4, "runs": 4, "status": "valid"}
 
 
