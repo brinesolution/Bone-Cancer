@@ -109,6 +109,9 @@ FINAL_POLICY = {
     "seed": 42,
     "device": "cuda",
     "allow_cpu_training": False,
+    "num_workers": 0,
+    "pin_memory": True,
+    "persistent_workers": False,
     "pretrained": True,
     "limit_batches": None,
     "selection_split": "val",
@@ -450,10 +453,10 @@ def _is_sanitized_run_record(config: Mapping[str, Any], alias: str) -> bool:
         "loader",
     }:
         return False
-    if data.get("dataset_root") != "dataset/Main":
+    if not _strict_equal(data.get("dataset_root"), config.get("dataset_root")):
         return False
-    if data.get("image_size") != config.get("image_size") or data.get("seed") != config.get(
-        "seed"
+    if not _strict_equal(data.get("image_size"), config.get("image_size")) or not _strict_equal(
+        data.get("seed"), config.get("seed")
     ):
         return False
     for key, allowed in NESTED_DATA_KEYS.items():
@@ -462,7 +465,7 @@ def _is_sanitized_run_record(config: Mapping[str, Any], alias: str) -> bool:
             return False
     loader = data["loader"]
     if any(
-        loader.get(key) != config.get(key)
+        not _strict_equal(loader.get(key), config.get(key))
         for key in ("batch_size", "num_workers", "pin_memory", "persistent_workers")
     ):
         return False

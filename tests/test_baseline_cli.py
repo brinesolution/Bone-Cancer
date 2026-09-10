@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import shutil
@@ -20,6 +21,7 @@ SCRIPT_PATH = Path(__file__).parents[1] / "scripts" / "09_train_baseline.py"
 CANONICAL_SCHEMA_PATH = (
     SCRIPT_PATH.parents[1] / "workspace" / "annotations" / "label_schema.yaml"
 )
+PINNED_SCHEMA_SHA256 = "6248ff8274f5ad5d26d046f851d672f33390d0a8ef07d6c4b6a0eee11dcefe95"
 SPEC = importlib.util.spec_from_file_location("baseline_cli", SCRIPT_PATH)
 assert SPEC is not None and SPEC.loader is not None
 baseline_cli = importlib.util.module_from_spec(SPEC)
@@ -119,6 +121,11 @@ def _mutate_data_config(
     data = yaml.safe_load(data_path.read_text(encoding="utf-8"))
     data[section][key] = value
     _write_yaml(data_path, data)
+
+
+def test_canonical_schema_matches_the_independently_pinned_phase4_digest() -> None:
+    assert baseline_cli.EXPECTED_SCHEMA_SHA256 == PINNED_SCHEMA_SHA256
+    assert hashlib.sha256(CANONICAL_SCHEMA_PATH.read_bytes()).hexdigest() == PINNED_SCHEMA_SHA256
 
 
 @pytest.mark.parametrize(
@@ -629,10 +636,28 @@ def test_schema_semantic_and_identity_mutation_is_rejected_before_publication(
     assert not (config.parents[1] / "artifacts").exists()
 
 
+def test_semantically_neutral_schema_byte_mutation_fails_fixed_identity_before_allocation(
+    tmp_path: Path,
+) -> None:
+    config = _project_config(tmp_path)
+    schema_path = config.parents[1] / "workspace" / "annotations" / "label_schema.yaml"
+    schema_path.write_bytes(schema_path.read_bytes() + b"\n# semantically neutral mutation\n")
+
+    with pytest.raises(ValueError, match="schema identity"):
+        baseline_cli.run_baseline(config, dependencies=_fake_dependencies([]))
+
+    assert not (config.parents[1] / "experiments").exists()
+    assert not (config.parents[1] / "artifacts").exists()
+
+
 @pytest.mark.parametrize(
     ("location", "key", "value"),
     [
         ("common", "amp", 1),
+        ("common", "num_workers", False),
+        ("common", "pin_memory", 1),
+        ("common", "persistent_workers", 0),
+        ("common", "persistent_workers", 1),
         ("preprocessing", "preserve_aspect_ratio", 1),
         ("augmentation", "horizontal_flip", 0),
         ("loader", "pin_memory", 1),
@@ -839,6 +864,37 @@ def test_validator_rejects_schema_digest_tampering(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="complete final run|final policy"):
         baseline_cli.validate_phase5_artifacts(root)
+
+
+@pytest.mark.parametrize(
+    ("path", "value"),
+    [
+        (("num_workers",), False),
+        (("pin_memory",), 1),
+        (("persistent_workers",), 0),
+        (("persistent_workers",), 1),
+        (("data", "seed"), 42.0),
+        (("data", "image_size"), 384.0),
+    ],
+)
+def test_validator_rejects_top_level_and_mirrored_type_alias_tampering(
+    tmp_path: Path, path: tuple[str, ...], value: object
+) -> None:
+    root, runs = _four_final_runs(tmp_path)
+    summary_path = root / "artifacts" / "metrics" / "baseline_summary.csv"
+    summary_before = summary_path.read_bytes()
+    config_path = runs["swin_tiny"] / "config.yaml"
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    target = config
+    for key in path[:-1]:
+        target = target[key]
+    target[path[-1]] = value
+    _write_yaml(config_path, config)
+
+    with pytest.raises(ValueError, match="complete final run|final policy|sanitized"):
+        baseline_cli.validate_phase5_artifacts(root)
+
+    assert summary_path.read_bytes() == summary_before
 
 
 def test_persisted_run_config_contains_only_sanitized_relative_paths(tmp_path: Path) -> None:
