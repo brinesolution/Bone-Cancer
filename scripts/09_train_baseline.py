@@ -17,32 +17,24 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-import numpy as np
-import pandas as pd
-import torch
 import yaml
 
-from bone_cancer_ai.data.datamodule import BoneCancerDataModule
-from bone_cancer_ai.evaluation.classification import binary_classification_metrics
-from bone_cancer_ai.evaluation.reports import (
-    BASELINE_SUMMARY_COLUMNS,
-    atomic_write_csv,
-    atomic_write_json,
-    confusion_matrix_frame,
-    measure_inference_latency,
-    update_baseline_summary,
-)
-from bone_cancer_ai.models.baselines.factory import (
-    count_trainable_parameters,
-    create_baseline,
-)
-from bone_cancer_ai.models.registry import BASELINE_REGISTRY
-from bone_cancer_ai.training.checkpointing import load_checkpoint
-from bone_cancer_ai.training.optimizer import class_weight_from_frame
-from bone_cancer_ai.training.trainer import BinaryTrainer
-
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-APPROVED_MODELS = tuple(BASELINE_REGISTRY)
+APPROVED_MODELS = ("densenet121", "efficientnet_b3", "convnext_tiny", "swin_tiny")
+BASELINE_SUMMARY_COLUMNS = [
+    "model",
+    "seed",
+    "best_epoch",
+    "AUROC",
+    "AUPRC",
+    "balanced_accuracy",
+    "F1",
+    "sensitivity",
+    "specificity",
+    "MCC",
+    "params",
+    "latency_ms",
+]
 REQUIRED_RUN_FILES = {
     "config.yaml",
     "environment.txt",
@@ -88,9 +80,9 @@ class RunDependencies:
 
     data_module_type: type
     trainer_type: type
-    create_model: Callable[..., torch.nn.Module]
-    count_parameters: Callable[[torch.nn.Module], int]
-    class_weight: Callable[[pd.DataFrame], torch.Tensor]
+    create_model: Callable[..., Any]
+    count_parameters: Callable[[Any], int]
+    class_weight: Callable[[Any], Any]
     load_checkpoint: Callable[..., Mapping[str, Any]]
     metrics: Callable[..., dict[str, object]]
     latency: Callable[..., dict[str, object]]
@@ -100,6 +92,19 @@ class RunDependencies:
 
 
 def _default_dependencies() -> RunDependencies:
+    import torch
+
+    from bone_cancer_ai.data.datamodule import BoneCancerDataModule
+    from bone_cancer_ai.evaluation.classification import binary_classification_metrics
+    from bone_cancer_ai.evaluation.reports import measure_inference_latency
+    from bone_cancer_ai.models.baselines.factory import (
+        count_trainable_parameters,
+        create_baseline,
+    )
+    from bone_cancer_ai.training.checkpointing import load_checkpoint
+    from bone_cancer_ai.training.optimizer import class_weight_from_frame
+    from bone_cancer_ai.training.trainer import BinaryTrainer
+
     return RunDependencies(
         data_module_type=BoneCancerDataModule,
         trainer_type=BinaryTrainer,
@@ -170,7 +175,7 @@ def resolve_config(
     if unknown_model_keys:
         raise ValueError(f"unknown model config keys: {sorted(unknown_model_keys)}")
     model = model_config.get("model")
-    if model not in BASELINE_REGISTRY:
+    if model not in APPROVED_MODELS:
         approved = ", ".join(APPROVED_MODELS)
         raise ValueError(f"Unknown baseline {model!r}; choose one of: {approved}")
     common_path = _resolve_declared_path(model_config.get("common_config"), model_path)
@@ -326,6 +331,8 @@ def _new_run_directory(output_root: Path, model: str) -> Path:
 
 
 def _write_environment(path: Path) -> None:
+    import torch
+
     packages = {}
     for name in ("torch", "timm", "pandas", "scikit-learn", "PyYAML"):
         try:
@@ -386,7 +393,10 @@ def _write_notes(path: Path, resolved: Mapping[str, Any], *, status: str, detail
     )
 
 
-def _prediction_frame(prediction: Mapping[str, Any]) -> pd.DataFrame:
+def _prediction_frame(prediction: Mapping[str, Any]) -> Any:
+    import pandas as pd
+    import torch
+
     logits = torch.as_tensor(prediction["logits"]).detach().cpu().to(torch.float64)
     targets = torch.as_tensor(prediction["targets"]).detach().cpu().to(torch.long)
     sample_ids = [str(value) for value in prediction["sample_ids"]]
@@ -405,6 +415,9 @@ def _prediction_frame(prediction: Mapping[str, Any]) -> pd.DataFrame:
 
 
 def _set_reproducibility(seed: int) -> None:
+    import numpy as np
+    import torch
+
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -434,15 +447,25 @@ def run_baseline(
 ) -> Path:
     """Execute one immutable train/validate/test baseline run."""
 
-    dependencies = dependencies or _default_dependencies()
     resolved = resolve_config(
         config_path,
         epochs_override=epochs_override,
         pretrained_override=pretrained_override,
         limit_batches=limit_batches,
     )
+    dependencies = dependencies or _default_dependencies()
     if not dependencies.cuda_available():
         raise RuntimeError("CUDA is required for Phase 5 baseline training and is unavailable")
+
+    import pandas as pd
+    import torch
+
+    from bone_cancer_ai.evaluation.reports import (
+        atomic_write_csv,
+        atomic_write_json,
+        confusion_matrix_frame,
+        update_baseline_summary,
+    )
 
     project_root = Path(resolved["project_root"])
     run_dir = _new_run_directory(Path(resolved["output_root"]), str(resolved["model"]))
@@ -568,7 +591,9 @@ def _strict_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"), parse_constant=reject_constant)
 
 
-def _validate_run_bundle(run_dir: Path, alias: str, summary_row: pd.Series) -> None:
+def _validate_run_bundle(run_dir: Path, alias: str, summary_row: Any) -> None:
+    import pandas as pd
+
     present = {path.name for path in run_dir.iterdir() if path.is_file()}
     missing = REQUIRED_RUN_FILES - present
     if missing:
@@ -645,6 +670,8 @@ def validate_phase5_artifacts(project_root: Path = PROJECT_ROOT) -> dict[str, ob
     summary_path = root / "artifacts" / "metrics" / "baseline_summary.csv"
     if not summary_path.is_file():
         raise ValueError("Phase 5 requires four approved model/seed summary rows")
+    import pandas as pd
+
     summary = pd.read_csv(summary_path)
     if summary.columns.tolist() != BASELINE_SUMMARY_COLUMNS:
         raise ValueError("baseline summary schema is invalid")
