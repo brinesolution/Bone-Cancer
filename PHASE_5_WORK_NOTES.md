@@ -22,7 +22,7 @@ Phase 5 establishes fair empirical reference models before HOSP-BoneNet is optim
 - [x] Task 1: registry, wrapper, configs, tests and four-model CUDA memory preflight.
 - [x] Task 2: binary metrics, latency/report writers and tests.
 - [x] Task 3: shared AMP trainer/checkpoints/early stopping and synthetic overfit tests.
-- [ ] Task 4: CLI, run bundles, summary aggregation and orchestration tests.
+- [x] Task 4: CLI, run bundles, summary aggregation and orchestration tests.
 - [ ] Task 5: sequential real training, independent review, verification, documentation and handoff.
 
 The user explicitly authorized Phase 5 under the master directive and selected the recommended SOL route. The directive already approves the architecture, model list, settings, fairness contract and acceptance criteria, so implementation proceeds without a second design decision. The repository is clean on the existing non-main `phase1-scaffold` branch at commit `7282c0f`; work remains in the user-specified project root.
