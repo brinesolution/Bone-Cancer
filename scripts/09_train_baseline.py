@@ -117,18 +117,19 @@ FINAL_POLICY = {
     "selection_split": "val",
     "selection_metric": "AUROC",
 }
-MEASURED_MEMORY_EXCEPTIONS = {
-    "convnext_tiny": {
-        "microbatch_size": 4,
-        "gradient_accumulation_steps": 2,
-        "effective_batch_size": 8,
-        "reason": "batch_size=8 exceeded the Windows commit limit twice",
-        "evidence": [
-            "logs/phase5_final_convnext_tiny_clean.log",
-            "logs/phase5_final_convnext_tiny_clean_retry2.log",
-        ],
-    }
+CONVNEXT_MEMORY_EXCEPTION = {
+    "microbatch_size": 4,
+    "gradient_accumulation_steps": 2,
+    "effective_batch_size": 8,
+    "reason": "two batch-8 host-memory allocation failures",
+    "evidence_artifact": (
+        "artifacts/verification/phase5_convnext_batch8_memory_failures.json"
+    ),
+    "evidence_sha256": (
+        "5803e6397faea3599c5fe75d10eac4948c89ad504efade83c09316a3df87b90d"
+    ),
 }
+MEMORY_EVIDENCE_BUNDLE_NAME = "memory_exception_evidence.json"
 PREPROCESSING_POLICY = {
     "preserve_aspect_ratio": True,
     "pad_to_square": True,
@@ -290,6 +291,70 @@ def _relative_path(path: Path, root: Path) -> str:
     return path.relative_to(root).as_posix() or "."
 
 
+def _verified_memory_evidence_bytes(
+    project_root: Path, memory_exception: Mapping[str, Any]
+) -> bytes:
+    evidence_path = (project_root / str(memory_exception["evidence_artifact"])).resolve()
+    expected_root = (project_root / "artifacts" / "verification").resolve()
+    _require_within(evidence_path, expected_root, name="memory exception evidence")
+    contents = evidence_path.read_bytes()
+    actual_sha256 = hashlib.sha256(contents).hexdigest()
+    if actual_sha256 != memory_exception["evidence_sha256"]:
+        raise ValueError("memory exception evidence SHA-256 does not match")
+
+    def reject_constant(value: str) -> None:
+        raise ValueError(f"non-finite JSON constant {value}")
+
+    try:
+        payload = json.loads(contents.decode("utf-8"), parse_constant=reject_constant)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ValueError("memory exception evidence must be readable strict JSON") from error
+    if not isinstance(payload, Mapping) or payload.get("model") != "convnext_tiny":
+        raise ValueError("memory exception evidence has the wrong model identity")
+    attempts = payload.get("attempts")
+    if not isinstance(attempts, list) or len(attempts) != 2:
+        raise ValueError("memory exception evidence must contain two failed attempts")
+    return contents
+
+
+def _copy_memory_exception_evidence(
+    run_dir: Path, resolved: Mapping[str, Any], project_root: Path
+) -> None:
+    memory_exception = resolved.get("memory_exception")
+    if not isinstance(memory_exception, Mapping):
+        return
+    contents = _verified_memory_evidence_bytes(project_root, memory_exception)
+    destination = run_dir / MEMORY_EVIDENCE_BUNDLE_NAME
+    temporary = destination.with_name(f".{destination.name}.{uuid4().hex}.tmp")
+    try:
+        temporary.write_bytes(contents)
+        temporary.replace(destination)
+        if hashlib.sha256(destination.read_bytes()).hexdigest() != memory_exception[
+            "evidence_sha256"
+        ]:
+            raise ValueError("memory exception run evidence SHA-256 does not match")
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _memory_exception_note_lines(resolved: Mapping[str, Any]) -> list[str]:
+    memory_exception = resolved.get("memory_exception")
+    if not isinstance(memory_exception, Mapping):
+        return []
+    return [
+        "Memory exception: "
+        f"microbatch_size={memory_exception['microbatch_size']}, "
+        "gradient_accumulation_steps="
+        f"{memory_exception['gradient_accumulation_steps']}, "
+        f"effective_batch_size={memory_exception['effective_batch_size']}",
+        f"Memory exception reason: {memory_exception['reason']}",
+        "Memory exception evidence: "
+        f"{memory_exception['evidence_artifact']} "
+        f"sha256={memory_exception['evidence_sha256']}",
+        f"Memory exception run copy: {MEMORY_EVIDENCE_BUNDLE_NAME}",
+    ]
+
+
 def _validate_data_config(data: Mapping[str, Any]) -> None:
     missing = {"project_root", "dataset_root", "schema_path"} - set(data)
     if missing:
@@ -431,7 +496,9 @@ def is_final_run_config(config: Mapping[str, Any]) -> bool:
     data = config.get("data")
     expected_policy = dict(FINAL_POLICY)
     expected_loader_policy = dict(LOADER_POLICY)
-    expected_exception = MEASURED_MEMORY_EXCEPTIONS.get(config.get("model"))
+    expected_exception = (
+        CONVNEXT_MEMORY_EXCEPTION if config.get("model") == "convnext_tiny" else None
+    )
     if expected_exception is not None:
         expected_policy["batch_size"] = expected_exception["microbatch_size"]
         expected_policy["gradient_accumulation_steps"] = expected_exception[
@@ -456,7 +523,7 @@ def is_final_run_config(config: Mapping[str, Any]) -> bool:
 
 def _is_sanitized_run_record(config: Mapping[str, Any], alias: str) -> bool:
     expected_keys = RECORD_CONFIG_KEYS | (
-        {"memory_exception"} if alias in MEASURED_MEMORY_EXCEPTIONS else set()
+        {"memory_exception"} if alias == "convnext_tiny" else set()
     )
     if set(config) != expected_keys:
         return False
@@ -515,15 +582,24 @@ def resolve_config(
         raise ValueError("model config must be inside the project configs directory")
     inferred_project_root = model_path.parent.parent.resolve()
     model_config = _load_yaml(model_path, name="model config")
-    unknown_model_keys = set(model_config) - {"model", "common_config"}
-    if unknown_model_keys:
-        raise ValueError(f"unknown model config keys: {sorted(unknown_model_keys)}")
     model = model_config.get("model")
     if not isinstance(model, str):
         raise ValueError("model must be a string")
     if model not in APPROVED_MODELS:
         approved = ", ".join(APPROVED_MODELS)
         raise ValueError(f"Unknown baseline {model!r}; choose one of: {approved}")
+    expected_model_keys = {"model", "common_config"} | (
+        {"memory_exception"} if model == "convnext_tiny" else set()
+    )
+    if set(model_config) != expected_model_keys:
+        raise ValueError(
+            f"model config keys must be exactly: {sorted(expected_model_keys)}"
+        )
+    memory_exception = model_config.get("memory_exception")
+    if model == "convnext_tiny" and not _strict_equal(
+        memory_exception, CONVNEXT_MEMORY_EXCEPTION
+    ):
+        raise ValueError("convnext_tiny memory_exception does not match the approved evidence")
     common_path = _resolve_declared_path(model_config.get("common_config"), model_path)
     common = _load_yaml(common_path, name="common config")
     unknown_common_keys = set(common) - COMMON_CONFIG_KEYS
@@ -634,7 +710,6 @@ def resolve_config(
     record["schema_sha256"] = schema_sha256
     record["pretrained"] = True if pretrained_override is None else pretrained_override
     record["limit_batches"] = limit_batches
-    memory_exception = MEASURED_MEMORY_EXCEPTIONS.get(model)
     if memory_exception is not None:
         record["batch_size"] = memory_exception["microbatch_size"]
         record["gradient_accumulation_steps"] = memory_exception[
@@ -763,20 +838,7 @@ def _write_git_state(path: Path, project_root: Path) -> None:
 def _write_notes(path: Path, resolved: Mapping[str, Any], *, status: str, detail: str) -> None:
     overrides = resolved["smoke_overrides"]
     run_kind = resolved["run_type"]
-    memory_exception = resolved.get("memory_exception")
-    memory_lines = (
-        [
-            "Memory exception: "
-            f"microbatch_size={memory_exception['microbatch_size']}, "
-            "gradient_accumulation_steps="
-            f"{memory_exception['gradient_accumulation_steps']}, "
-            f"effective_batch_size={memory_exception['effective_batch_size']}",
-            f"Memory exception reason: {memory_exception['reason']}",
-            "Memory exception evidence: " + ", ".join(memory_exception["evidence"]),
-        ]
-        if isinstance(memory_exception, Mapping)
-        else []
-    )
+    memory_lines = _memory_exception_note_lines(resolved)
     path.write_text(
         "\n".join(
             [
@@ -878,6 +940,7 @@ def run_baseline(
     notes_path = run_dir / "notes.md"
 
     try:
+        _copy_memory_exception_evidence(run_dir, record, project_root)
         run_dir.joinpath("config.yaml").write_text(
             yaml.safe_dump(record, sort_keys=False), encoding="utf-8", newline="\n"
         )
@@ -1004,7 +1067,33 @@ def _strict_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"), parse_constant=reject_constant)
 
 
-def _complete_final_candidate(run_dir: Path, alias: str, seed: int) -> bool:
+def _validate_memory_exception_bundle(
+    run_dir: Path,
+    config: Mapping[str, Any],
+    project_root: Path,
+    note_lines: list[str],
+) -> None:
+    memory_exception = config.get("memory_exception")
+    if memory_exception is None:
+        return
+    if not isinstance(memory_exception, Mapping):
+        raise ValueError("memory exception record is malformed")
+    source_contents = _verified_memory_evidence_bytes(project_root, memory_exception)
+    copy_path = run_dir / MEMORY_EVIDENCE_BUNDLE_NAME
+    try:
+        copy_contents = copy_path.read_bytes()
+        copy_payload = _strict_json(copy_path)
+    except (OSError, ValueError) as error:
+        raise ValueError("memory exception evidence copy is missing or unreadable") from error
+    if copy_contents != source_contents or not isinstance(copy_payload, Mapping):
+        raise ValueError("memory exception evidence copy does not match its verified source")
+    if any(note_lines.count(line) != 1 for line in _memory_exception_note_lines(config)):
+        raise ValueError("memory exception notes are missing or tampered")
+
+
+def _complete_final_candidate(
+    run_dir: Path, alias: str, seed: int, project_root: Path
+) -> bool:
     present = {path.name for path in run_dir.iterdir() if path.is_file()}
     if not REQUIRED_RUN_FILES <= present:
         return False
@@ -1013,7 +1102,8 @@ def _complete_final_candidate(run_dir: Path, alias: str, seed: int) -> bool:
         environment = run_dir.joinpath("environment.txt").read_text(encoding="utf-8").strip()
         git_state = run_dir.joinpath("git_commit.txt").read_text(encoding="utf-8").strip()
         note_lines = run_dir.joinpath("notes.md").read_text(encoding="utf-8").splitlines()
-    except (OSError, ValueError):
+        _validate_memory_exception_bundle(run_dir, config, project_root, note_lines)
+    except (OSError, ValueError, KeyError, TypeError):
         return False
     return bool(
         config.get("model") == alias
@@ -1043,6 +1133,9 @@ def _validate_run_bundle(run_dir: Path, alias: str, summary_row: Any) -> None:
         or not is_final_run_config(config)
     ):
         raise ValueError(f"run {run_dir.name} violates the exact final policy")
+    note_lines = run_dir.joinpath("notes.md").read_text(encoding="utf-8").splitlines()
+    project_root = run_dir.parents[3]
+    _validate_memory_exception_bundle(run_dir, config, project_root, note_lines)
     for evidence_name in ("environment.txt", "git_commit.txt"):
         if not run_dir.joinpath(evidence_name).read_text(encoding="utf-8").strip():
             raise ValueError(f"run {run_dir.name} has empty {evidence_name} evidence")
@@ -1134,7 +1227,7 @@ def validate_phase5_artifacts(project_root: Path = PROJECT_ROOT) -> dict[str, ob
         complete_final_runs = [
             candidate
             for candidate in candidates
-            if _complete_final_candidate(candidate, alias, int(row["seed"]))
+            if _complete_final_candidate(candidate, alias, int(row["seed"]), root)
         ]
         if not complete_final_runs:
             raise ValueError(f"no complete final run exists for {alias}")

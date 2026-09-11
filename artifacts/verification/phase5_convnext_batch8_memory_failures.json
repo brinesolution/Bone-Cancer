@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "model": "convnext_tiny",
+  "conclusion": "Two separate final training attempts at microbatch 8 ended in host-memory allocation failures.",
+  "command": ".\\.venv\\Scripts\\python.exe scripts\\09_train_baseline.py --config configs\\baseline_convnext_tiny.yaml",
+  "observed_training_policy": {
+    "model_config": "configs/baseline_convnext_tiny.yaml",
+    "common_config": "configs/train.yaml",
+    "image_size": 384,
+    "microbatch_size": 8,
+    "gradient_accumulation_steps": 1,
+    "effective_batch_size": 8,
+    "epochs": 40,
+    "seed": 42,
+    "pretrained": true,
+    "device": "cuda",
+    "amp": true
+  },
+  "config_identity": {
+    "git_commit": "e80eaa305c6100717ce43285e645221a9bcfc89c",
+    "model_config_sha256": "637534b6e3098b1e20ba93797b9a259cda47e0b0d4dcbad0ee9fb643a9b3e9b2",
+    "common_config_sha256": "e44150b5e526d218e9b9acfc0cb14118e5ab207733abd037a0ecdbef142aec96",
+    "resolved_run_config_sha256": "33eb9c57ec0023f5c16686e12359c6cae6b798bea2081b5b0fc642c1693cd8b0"
+  },
+  "attempts": [
+    {
+      "run_id": "20260911T090157020280Z-35f8245e",
+      "started_utc": "2026-09-11T09:01:57.020280Z",
+      "log_modified_utc": "2026-09-11T09:08:24.2151002Z",
+      "log_path": "logs/phase5_final_convnext_tiny_clean.log",
+      "log_bytes": 1766,
+      "log_sha256": "29fd1c937a8f66e2dfb92c497abcbff53a82c765d6184767b14660b8c3525cb1",
+      "error_excerpt": [
+        "Runtime image decode failed for sample_b6f74df21663ab63: MemoryError",
+        "Runtime image decode failed for sample_dbbf4e650e02e337: MemoryError",
+        "Runtime image decode failed for sample_f18d0cd3258ceec0: MemoryError",
+        "RuntimeError: bad allocation"
+      ]
+    },
+    {
+      "run_id": "20260911T091243915359Z-e5afa2fe",
+      "started_utc": "2026-09-11T09:12:43.915359Z",
+      "log_modified_utc": "2026-09-11T10:03:22.8982134Z",
+      "log_path": "logs/phase5_final_convnext_tiny_clean_retry2.log",
+      "log_bytes": 376,
+      "log_sha256": "7b5e8cf5c7ab43660659eda7e3f95535aeffa8e3864eef2be6ab77b8e52dac71",
+      "error_excerpt": [
+        "Runtime image decode failed for sample_97c0b995053c010d: MemoryError",
+        "Runtime image decode failed for sample_df30d71b22d986ba: MemoryError",
+        "Runtime image decode failed for sample_5b29db77f7f7bc1a: MemoryError",
+        "LLVM ERROR: out of memory"
+      ]
+    }
+  ]
+}

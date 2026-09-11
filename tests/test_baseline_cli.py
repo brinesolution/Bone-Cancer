@@ -21,7 +21,24 @@ SCRIPT_PATH = Path(__file__).parents[1] / "scripts" / "09_train_baseline.py"
 CANONICAL_SCHEMA_PATH = (
     SCRIPT_PATH.parents[1] / "workspace" / "annotations" / "label_schema.yaml"
 )
+CANONICAL_MEMORY_EVIDENCE_PATH = (
+    SCRIPT_PATH.parents[1]
+    / "artifacts"
+    / "verification"
+    / "phase5_convnext_batch8_memory_failures.json"
+)
 PINNED_SCHEMA_SHA256 = "6248ff8274f5ad5d26d046f851d672f33390d0a8ef07d6c4b6a0eee11dcefe95"
+PINNED_MEMORY_EVIDENCE_SHA256 = (
+    "5803e6397faea3599c5fe75d10eac4948c89ad504efade83c09316a3df87b90d"
+)
+CONVNEXT_MEMORY_EXCEPTION = {
+    "microbatch_size": 4,
+    "gradient_accumulation_steps": 2,
+    "effective_batch_size": 8,
+    "reason": "two batch-8 host-memory allocation failures",
+    "evidence_artifact": "artifacts/verification/phase5_convnext_batch8_memory_failures.json",
+    "evidence_sha256": PINNED_MEMORY_EVIDENCE_SHA256,
+}
 SPEC = importlib.util.spec_from_file_location("baseline_cli", SCRIPT_PATH)
 assert SPEC is not None and SPEC.loader is not None
 baseline_cli = importlib.util.module_from_spec(SPEC)
@@ -32,6 +49,26 @@ SPEC.loader.exec_module(baseline_cli)
 def _write_yaml(path: Path, payload: dict[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+
+
+def _model_config(alias: str) -> dict[str, object]:
+    config: dict[str, object] = {"model": alias, "common_config": "train.yaml"}
+    if alias == "convnext_tiny":
+        config["memory_exception"] = dict(CONVNEXT_MEMORY_EXCEPTION)
+    return config
+
+
+def _write_model_config(path: Path, alias: str) -> None:
+    _write_yaml(path, _model_config(alias))
+    if alias == "convnext_tiny":
+        evidence_path = (
+            path.parents[1]
+            / "artifacts"
+            / "verification"
+            / CANONICAL_MEMORY_EVIDENCE_PATH.name
+        )
+        evidence_path.parent.mkdir(parents=True, exist_ok=True)
+        evidence_path.write_bytes(CANONICAL_MEMORY_EVIDENCE_PATH.read_bytes())
 
 
 def _project_config(tmp_path: Path, **common_updates: object) -> Path:
@@ -197,25 +234,87 @@ def test_default_config_is_a_cuda_amp_pretrained_full_run(tmp_path: Path) -> Non
 
 def test_convnext_measured_memory_exception_preserves_effective_batch(tmp_path: Path) -> None:
     config = _project_config(tmp_path)
-    _write_yaml(config, {"model": "convnext_tiny", "common_config": "train.yaml"})
+    _write_model_config(config, "convnext_tiny")
 
     resolved = baseline_cli.resolve_config(config)["record"]
 
     assert resolved["batch_size"] == 4
     assert resolved["gradient_accumulation_steps"] == 2
     assert resolved["data"]["loader"]["batch_size"] == 4
-    assert resolved["memory_exception"] == {
-        "microbatch_size": 4,
-        "gradient_accumulation_steps": 2,
-        "effective_batch_size": 8,
-        "reason": "batch_size=8 exceeded the Windows commit limit twice",
-        "evidence": [
-            "logs/phase5_final_convnext_tiny_clean.log",
-            "logs/phase5_final_convnext_tiny_clean_retry2.log",
-        ],
-    }
+    assert resolved["memory_exception"] == CONVNEXT_MEMORY_EXCEPTION
     assert resolved["run_type"] == "final"
     assert baseline_cli.is_final_run_config(resolved) is True
+
+
+@pytest.mark.parametrize(
+    ("alias", "batch_size", "accumulation_steps", "has_exception"),
+    [
+        ("densenet121", 8, 1, False),
+        ("efficientnet_b3", 8, 1, False),
+        ("convnext_tiny", 4, 2, True),
+        ("swin_tiny", 8, 1, False),
+    ],
+)
+def test_only_convnext_uses_the_measured_memory_exception(
+    tmp_path: Path,
+    alias: str,
+    batch_size: int,
+    accumulation_steps: int,
+    has_exception: bool,
+) -> None:
+    config = _project_config(tmp_path)
+    _write_model_config(config, alias)
+
+    record = baseline_cli.resolve_config(config)["record"]
+
+    assert record["batch_size"] == batch_size
+    assert record["gradient_accumulation_steps"] == accumulation_steps
+    assert record["data"]["loader"]["batch_size"] == batch_size
+    assert ("memory_exception" in record) is has_exception
+    assert record["run_type"] == "final"
+
+
+def test_convnext_model_config_requires_the_exact_memory_exception(tmp_path: Path) -> None:
+    config = _project_config(tmp_path)
+    _write_yaml(config, {"model": "convnext_tiny", "common_config": "train.yaml"})
+
+    with pytest.raises(ValueError, match="memory_exception"):
+        baseline_cli.resolve_config(config)
+
+
+def test_non_convnext_model_config_rejects_a_memory_exception(tmp_path: Path) -> None:
+    config = _project_config(tmp_path)
+    model_config = _model_config("densenet121")
+    model_config["memory_exception"] = dict(CONVNEXT_MEMORY_EXCEPTION)
+    _write_yaml(config, model_config)
+
+    with pytest.raises(ValueError, match="model config keys"):
+        baseline_cli.resolve_config(config)
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("microbatch_size", 8),
+        ("gradient_accumulation_steps", 1),
+        ("effective_batch_size", 7),
+        ("reason", "unreviewed reason"),
+        ("evidence_sha256", "0" * 64),
+        ("unknown", True),
+    ],
+)
+def test_convnext_model_config_rejects_memory_exception_tampering(
+    tmp_path: Path, key: str, value: object
+) -> None:
+    config = _project_config(tmp_path)
+    model_config = _model_config("convnext_tiny")
+    exception = dict(model_config["memory_exception"])
+    exception[key] = value
+    model_config["memory_exception"] = exception
+    _write_yaml(config, model_config)
+
+    with pytest.raises(ValueError, match="memory_exception"):
+        baseline_cli.resolve_config(config)
 
 
 @pytest.mark.parametrize("missing_key", ["project_root", "dataset_root", "schema_path"])
@@ -497,19 +596,50 @@ def test_successful_runs_are_unique_complete_and_never_use_test_for_selection(
 
 def test_convnext_run_persists_measured_memory_exception_evidence(tmp_path: Path) -> None:
     config = _project_config(tmp_path)
-    _write_yaml(config, {"model": "convnext_tiny", "common_config": "train.yaml"})
+    _write_model_config(config, "convnext_tiny")
 
     run = baseline_cli.run_baseline(config, dependencies=_fake_dependencies([]))
 
     persisted = yaml.safe_load(run.joinpath("config.yaml").read_text(encoding="utf-8"))
-    assert persisted["memory_exception"]["effective_batch_size"] == 8
+    assert persisted["memory_exception"] == CONVNEXT_MEMORY_EXCEPTION
+    evidence_copy = run / "memory_exception_evidence.json"
+    assert evidence_copy.read_bytes() == CANONICAL_MEMORY_EVIDENCE_PATH.read_bytes()
+    assert hashlib.sha256(evidence_copy.read_bytes()).hexdigest() == PINNED_MEMORY_EVIDENCE_SHA256
     notes = run.joinpath("notes.md").read_text(encoding="utf-8")
     assert (
         "Memory exception: microbatch_size=4, gradient_accumulation_steps=2, "
         "effective_batch_size=8" in notes
     )
-    assert "logs/phase5_final_convnext_tiny_clean.log" in notes
-    assert "logs/phase5_final_convnext_tiny_clean_retry2.log" in notes
+    assert "Memory exception reason: two batch-8 host-memory allocation failures" in notes
+    assert (
+        "Memory exception evidence: "
+        "artifacts/verification/phase5_convnext_batch8_memory_failures.json "
+        f"sha256={PINNED_MEMORY_EVIDENCE_SHA256}" in notes
+    )
+    assert "Memory exception run copy: memory_exception_evidence.json" in notes
+
+
+def test_convnext_run_rejects_tampered_memory_evidence_before_training(tmp_path: Path) -> None:
+    config = _project_config(tmp_path)
+    _write_model_config(config, "convnext_tiny")
+    evidence_path = (
+        config.parents[1]
+        / "artifacts"
+        / "verification"
+        / CANONICAL_MEMORY_EVIDENCE_PATH.name
+    )
+    evidence_path.write_text("{}\n", encoding="utf-8")
+    events: list[str] = []
+
+    with pytest.raises(ValueError, match="evidence SHA-256"):
+        baseline_cli.run_baseline(config, dependencies=_fake_dependencies(events))
+
+    assert events == []
+    run = next(
+        (config.parents[1] / "experiments" / "baselines" / "convnext_tiny").iterdir()
+    )
+    assert "Status: Failed" in run.joinpath("notes.md").read_text(encoding="utf-8")
+    assert not run.joinpath("metrics.json").exists()
 
 
 def test_failed_run_records_status_without_metrics_or_summary_row(tmp_path: Path) -> None:
@@ -762,7 +892,7 @@ def test_phase5_validator_accepts_four_complete_final_runs(tmp_path: Path) -> No
     config_dir = first_config.parent
     for alias in ("densenet121", "efficientnet_b3", "convnext_tiny", "swin_tiny"):
         config = config_dir / f"baseline_{alias}.yaml"
-        _write_yaml(config, {"model": alias, "common_config": "train.yaml"})
+        _write_model_config(config, alias)
         baseline_cli.run_baseline(config, dependencies=_fake_dependencies([]))
 
     result = baseline_cli.validate_phase5_artifacts(first_config.parents[1])
@@ -775,7 +905,7 @@ def test_phase5_validator_rejects_a_smoke_override_bundle(tmp_path: Path) -> Non
     config_dir = first_config.parent
     for alias in ("densenet121", "efficientnet_b3", "convnext_tiny", "swin_tiny"):
         config = config_dir / f"baseline_{alias}.yaml"
-        _write_yaml(config, {"model": alias, "common_config": "train.yaml"})
+        _write_model_config(config, alias)
         kwargs = {"epochs_override": 1} if alias == "swin_tiny" else {}
         baseline_cli.run_baseline(
             config,
@@ -794,7 +924,7 @@ def test_phase5_validator_keeps_latest_final_when_a_newer_smoke_run_exists(
     config_dir = first_config.parent
     for alias in ("densenet121", "efficientnet_b3", "convnext_tiny", "swin_tiny"):
         config = config_dir / f"baseline_{alias}.yaml"
-        _write_yaml(config, {"model": alias, "common_config": "train.yaml"})
+        _write_model_config(config, alias)
         baseline_cli.run_baseline(config, dependencies=_fake_dependencies([]))
     baseline_cli.run_baseline(
         config_dir / "baseline_swin_tiny.yaml",
@@ -810,7 +940,7 @@ def _four_final_runs(tmp_path: Path) -> tuple[Path, dict[str, Path]]:
     runs = {}
     for alias in ("densenet121", "efficientnet_b3", "convnext_tiny", "swin_tiny"):
         config = first_config.parent / f"baseline_{alias}.yaml"
-        _write_yaml(config, {"model": alias, "common_config": "train.yaml"})
+        _write_model_config(config, alias)
         runs[alias] = baseline_cli.run_baseline(config, dependencies=_fake_dependencies([]))
     return first_config.parents[1], runs
 
@@ -914,6 +1044,40 @@ def test_validator_rejects_convnext_memory_exception_tampering(tmp_path: Path) -
     _write_yaml(config_path, config)
 
     with pytest.raises(ValueError, match="complete final run|final policy"):
+        baseline_cli.validate_phase5_artifacts(root)
+
+
+@pytest.mark.parametrize(
+    "removed_line",
+    [
+        "Memory exception: microbatch_size=4, gradient_accumulation_steps=2, "
+        "effective_batch_size=8",
+        "Memory exception reason: two batch-8 host-memory allocation failures",
+        "Memory exception evidence: "
+        "artifacts/verification/phase5_convnext_batch8_memory_failures.json "
+        f"sha256={PINNED_MEMORY_EVIDENCE_SHA256}",
+        "Memory exception run copy: memory_exception_evidence.json",
+    ],
+)
+def test_validator_rejects_missing_convnext_memory_note_evidence(
+    tmp_path: Path, removed_line: str
+) -> None:
+    root, runs = _four_final_runs(tmp_path)
+    notes_path = runs["convnext_tiny"] / "notes.md"
+    notes = notes_path.read_text(encoding="utf-8")
+    assert removed_line in notes
+    notes_path.write_text(notes.replace(removed_line + "\n", ""), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="complete final run|memory exception"):
+        baseline_cli.validate_phase5_artifacts(root)
+
+
+def test_validator_rejects_tampered_convnext_memory_evidence_copy(tmp_path: Path) -> None:
+    root, runs = _four_final_runs(tmp_path)
+    evidence_copy = runs["convnext_tiny"] / "memory_exception_evidence.json"
+    evidence_copy.write_text("{}\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="complete final run|memory exception"):
         baseline_cli.validate_phase5_artifacts(root)
 
 

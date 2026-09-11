@@ -1,2 +1,9 @@
 model: convnext_tiny
 common_config: train.yaml
+memory_exception:
+  microbatch_size: 4
+  gradient_accumulation_steps: 2
+  effective_batch_size: 8
+  reason: two batch-8 host-memory allocation failures
+  evidence_artifact: artifacts/verification/phase5_convnext_batch8_memory_failures.json
+  evidence_sha256: 5803e6397faea3599c5fe75d10eac4948c89ad504efade83c09316a3df87b90d

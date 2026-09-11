@@ -49,10 +49,24 @@ def test_baseline_configs_share_the_complete_common_training_config() -> None:
     config_dir = Path(__file__).parents[1] / "configs"
 
     for alias in EXPECTED_MODELS:
-        assert load_config(config_dir / f"baseline_{alias}.yaml") == {
+        expected = {
             "model": alias,
             "common_config": "train.yaml",
         }
+        if alias == "convnext_tiny":
+            expected["memory_exception"] = {
+                "microbatch_size": 4,
+                "gradient_accumulation_steps": 2,
+                "effective_batch_size": 8,
+                "reason": "two batch-8 host-memory allocation failures",
+                "evidence_artifact": (
+                    "artifacts/verification/phase5_convnext_batch8_memory_failures.json"
+                ),
+                "evidence_sha256": (
+                    "5803e6397faea3599c5fe75d10eac4948c89ad504efade83c09316a3df87b90d"
+                ),
+            }
+        assert load_config(config_dir / f"baseline_{alias}.yaml") == expected
 
     assert load_config(config_dir / "train.yaml") == {
         "data_config": "data.yaml",
