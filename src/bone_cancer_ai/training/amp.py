@@ -30,6 +30,6 @@ def build_grad_scaler(device: torch.device, requested: bool) -> torch.amp.GradSc
     return torch.amp.GradScaler(
         device=device.type,
         enabled=amp_is_enabled(device, requested),
-        init_scale=256.0,
+        init_scale=64.0,
         growth_interval=100000,
     )
