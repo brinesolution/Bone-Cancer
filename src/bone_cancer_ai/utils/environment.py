@@ -55,8 +55,8 @@ PACKAGE_IMPORTS = {
 }
 
 
-def environment_report(require_cuda: bool = False) -> dict:
-    """Import declared packages and verify a synthetic tensor operation on the actual device."""
+def environment_report(require_cuda: bool = False, *, run_tensor_check: bool = True) -> dict:
+    """Import dependencies and optionally verify tensor compute on the actual device."""
     packages = {}
     for distribution, module in PACKAGE_IMPORTS.items():
         try:
@@ -81,10 +81,13 @@ def environment_report(require_cuda: bool = False) -> dict:
                     "compute_capability": f"{props.major}.{props.minor}",
                 }
             )
-    try:
-        compute = verify_tensor_device("cuda" if available else "cpu")
-    except Exception as exc:
-        compute = {"finite_gradient": False, "error": f"{type(exc).__name__}: {exc}"}
+    if run_tensor_check:
+        try:
+            compute = verify_tensor_device("cuda" if available else "cpu")
+        except Exception as exc:
+            compute = {"finite_gradient": False, "error": f"{type(exc).__name__}: {exc}"}
+    else:
+        compute = {"status": "Not run"}
     return {
         "timestamp_utc": datetime.now(UTC).isoformat(),
         "python": platform.python_version(),
@@ -96,7 +99,7 @@ def environment_report(require_cuda: bool = False) -> dict:
         "ok": (
             sys.version_info[:2] == (3, 11)
             and all(value["import_ok"] for value in packages.values())
-            and compute["finite_gradient"]
+            and (not run_tensor_check or compute["finite_gradient"])
             and (available or not require_cuda)
         ),
         "model_training": "Not run",

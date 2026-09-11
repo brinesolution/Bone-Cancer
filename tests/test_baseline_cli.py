@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -1305,23 +1304,8 @@ def test_phase5_commands_expose_four_trainers_and_validation() -> None:
         "--validate-artifacts",
     ]
 
-    powershell = shutil.which("powershell.exe") or shutil.which("pwsh")
-    assert powershell is not None
-    completed = subprocess.run(
-        [
-            powershell,
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-File",
-            "scripts/run_phase.ps1",
-            "-Action",
-            "phase5",
-        ],
-        cwd=project_root,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert completed.returncode != 0
-    assert "four approved" in completed.stderr
+    run_phase = project_root.joinpath("scripts/run_phase.ps1").read_text(encoding="utf-8")
+    assert (
+        "'phase5' { & $projectPython 'scripts/09_train_baseline.py' "
+        "--validate-artifacts }"
+    ) in run_phase

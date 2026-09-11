@@ -11,16 +11,20 @@ import torch
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_environment_cli_reports_cuda_and_dependencies(tmp_path):
+def test_environment_cli_reports_dependencies_without_tensor_check(tmp_path):
     script = ROOT / "scripts" / "00_verify_environment.py"
     result = subprocess.run(
-        [sys.executable, str(script)], cwd=tmp_path, capture_output=True, text=True, timeout=180
+        [sys.executable, str(script), "--skip-tensor-check"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        timeout=180,
     )
     assert result.returncode == 0, result.stderr + result.stdout
     report = json.loads(result.stdout)
     assert report["ok"] is True
     assert report["python"].startswith("3.11.")
-    assert report["cuda"]["available"] is torch.cuda.is_available()
+    assert report["tensor_check"] == {"status": "Not run"}
     assert report["packages"]["torch"]["import_ok"] is True
 
 

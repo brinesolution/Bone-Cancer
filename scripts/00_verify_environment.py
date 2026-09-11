@@ -19,6 +19,11 @@ def main() -> int:
     )
     parser.add_argument("--output", type=Path, help="New JSON report path relative to project_root")
     parser.add_argument("--require-cuda", action="store_true", help="Fail if CUDA is unavailable")
+    parser.add_argument(
+        "--skip-tensor-check",
+        action="store_true",
+        help="Verify dependency imports without allocating a CPU/CUDA tensor",
+    )
     args = parser.parse_args()
     logger = configure_logging()
     try:
@@ -38,7 +43,10 @@ def main() -> int:
         os.environ.setdefault("NO_ALBUMENTATIONS_UPDATE", "1")
         from bone_cancer_ai.utils.environment import environment_report
 
-        report = environment_report(require_cuda=args.require_cuda)
+        report = environment_report(
+            require_cuda=args.require_cuda,
+            run_tensor_check=not args.skip_tensor_check,
+        )
         report["paths"] = {
             "project_root": str(paths.project_root),
             "dataset_root": str(paths.dataset_root),
