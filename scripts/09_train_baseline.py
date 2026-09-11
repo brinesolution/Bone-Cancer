@@ -130,6 +130,12 @@ CONVNEXT_MEMORY_EXCEPTION = {
     ),
 }
 MEMORY_EVIDENCE_BUNDLE_NAME = "memory_exception_evidence.json"
+MEMORY_EXCEPTION_NOTE_PREFIXES = (
+    "Memory exception:",
+    "Memory exception reason:",
+    "Memory exception evidence:",
+    "Memory exception run copy:",
+)
 PREPROCESSING_POLICY = {
     "preserve_aspect_ratio": True,
     "pad_to_square": True,
@@ -297,7 +303,10 @@ def _verified_memory_evidence_bytes(
     evidence_path = (project_root / str(memory_exception["evidence_artifact"])).resolve()
     expected_root = (project_root / "artifacts" / "verification").resolve()
     _require_within(evidence_path, expected_root, name="memory exception evidence")
-    contents = evidence_path.read_bytes()
+    try:
+        contents = evidence_path.read_bytes()
+    except OSError as error:
+        raise ValueError("memory exception evidence is missing or unreadable") from error
     actual_sha256 = hashlib.sha256(contents).hexdigest()
     if actual_sha256 != memory_exception["evidence_sha256"]:
         raise ValueError("memory exception evidence SHA-256 does not match")
@@ -1020,6 +1029,10 @@ def run_baseline(
             },
             "resources": resources,
         }
+        publication_note_lines = notes_path.read_text(encoding="utf-8").splitlines()
+        _validate_memory_exception_bundle(
+            run_dir, record, project_root, publication_note_lines
+        )
         atomic_write_csv(pd.DataFrame(fit_result["history"]), run_dir / "history.csv")
         atomic_write_csv(
             confusion_matrix_frame(test_metrics), run_dir / "confusion_matrix.csv"
@@ -1030,6 +1043,10 @@ def run_baseline(
             "best.pt\n", encoding="utf-8", newline="\n"
         )
         _write_notes(notes_path, record, status="Complete", detail="Artifacts are complete.")
+        publication_note_lines = notes_path.read_text(encoding="utf-8").splitlines()
+        _validate_memory_exception_bundle(
+            run_dir, record, project_root, publication_note_lines
+        )
         summary_row = {
             "model": record["model"],
             "seed": record["seed"],
@@ -1074,10 +1091,30 @@ def _validate_memory_exception_bundle(
     note_lines: list[str],
 ) -> None:
     memory_exception = config.get("memory_exception")
+    expected_note_lines = _memory_exception_note_lines(config)
+    actual_note_lines = [
+        line for line in note_lines if line.startswith(MEMORY_EXCEPTION_NOTE_PREFIXES)
+    ]
+    if actual_note_lines != expected_note_lines:
+        raise ValueError("memory exception notes are missing, reordered, or tampered")
     if memory_exception is None:
         return
     if not isinstance(memory_exception, Mapping):
         raise ValueError("memory exception record is malformed")
+    if config.get("model") != "convnext_tiny" or not _strict_equal(
+        memory_exception, CONVNEXT_MEMORY_EXCEPTION
+    ):
+        raise ValueError("memory exception record does not match the approved evidence")
+    data = config.get("data")
+    if not (
+        config.get("batch_size") == memory_exception["microbatch_size"]
+        and config.get("gradient_accumulation_steps")
+        == memory_exception["gradient_accumulation_steps"]
+        and isinstance(data, Mapping)
+        and isinstance(data.get("loader"), Mapping)
+        and data["loader"].get("batch_size") == memory_exception["microbatch_size"]
+    ):
+        raise ValueError("memory exception record has inconsistent batch settings")
     source_contents = _verified_memory_evidence_bytes(project_root, memory_exception)
     copy_path = run_dir / MEMORY_EVIDENCE_BUNDLE_NAME
     try:
@@ -1087,8 +1124,6 @@ def _validate_memory_exception_bundle(
         raise ValueError("memory exception evidence copy is missing or unreadable") from error
     if copy_contents != source_contents or not isinstance(copy_payload, Mapping):
         raise ValueError("memory exception evidence copy does not match its verified source")
-    if any(note_lines.count(line) != 1 for line in _memory_exception_note_lines(config)):
-        raise ValueError("memory exception notes are missing or tampered")
 
 
 def _complete_final_candidate(

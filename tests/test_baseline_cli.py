@@ -39,6 +39,15 @@ CONVNEXT_MEMORY_EXCEPTION = {
     "evidence_artifact": "artifacts/verification/phase5_convnext_batch8_memory_failures.json",
     "evidence_sha256": PINNED_MEMORY_EVIDENCE_SHA256,
 }
+EXPECTED_CONVNEXT_MEMORY_NOTE_LINES = [
+    "Memory exception: microbatch_size=4, gradient_accumulation_steps=2, "
+    "effective_batch_size=8",
+    "Memory exception reason: two batch-8 host-memory allocation failures",
+    "Memory exception evidence: "
+    "artifacts/verification/phase5_convnext_batch8_memory_failures.json "
+    f"sha256={PINNED_MEMORY_EVIDENCE_SHA256}",
+    "Memory exception run copy: memory_exception_evidence.json",
+]
 SPEC = importlib.util.spec_from_file_location("baseline_cli", SCRIPT_PATH)
 assert SPEC is not None and SPEC.loader is not None
 baseline_cli = importlib.util.module_from_spec(SPEC)
@@ -642,6 +651,69 @@ def test_convnext_run_rejects_tampered_memory_evidence_before_training(tmp_path:
     assert not run.joinpath("metrics.json").exists()
 
 
+@pytest.mark.parametrize(
+    ("target", "action"),
+    [
+        ("source", "delete"),
+        ("source", "tamper"),
+        ("copy", "delete"),
+        ("copy", "tamper"),
+        ("record", "tamper"),
+    ],
+)
+def test_convnext_revalidates_memory_evidence_after_fit_before_publication(
+    tmp_path: Path, target: str, action: str
+) -> None:
+    config = _project_config(tmp_path)
+    _write_model_config(config, "convnext_tiny")
+    dependencies = _fake_dependencies([])
+
+    class EvidenceMutatingTrainer(_FakeTrainer):
+        def __init__(self, model, **kwargs) -> None:
+            super().__init__(model, **kwargs)
+            self.record = kwargs["resolved_config"]
+
+        def fit(self, train_loader, val_loader):
+            result = super().fit(train_loader, val_loader)
+            if target == "record":
+                self.record["memory_exception"]["reason"] = "contradictory reason"
+                return result
+            path = (
+                self.directory / "memory_exception_evidence.json"
+                if target == "copy"
+                else self.directory.parents[3]
+                / "artifacts"
+                / "verification"
+                / CANONICAL_MEMORY_EVIDENCE_PATH.name
+            )
+            if action == "delete":
+                path.unlink()
+            else:
+                path.write_text("{}\n", encoding="utf-8")
+            return result
+
+    dependencies.trainer_type = EvidenceMutatingTrainer
+
+    with pytest.raises((FileNotFoundError, ValueError), match="memory exception|evidence"):
+        baseline_cli.run_baseline(config, dependencies=dependencies)
+
+    run = next(
+        (config.parents[1] / "experiments" / "baselines" / "convnext_tiny").iterdir()
+    )
+    assert "Status: Failed" in run.joinpath("notes.md").read_text(encoding="utf-8")
+    for result_name in (
+        "metrics.json",
+        "history.csv",
+        "confusion_matrix.csv",
+        "test_predictions.csv",
+        "best_checkpoint_path.txt",
+    ):
+        assert not run.joinpath(result_name).exists()
+    assert not (
+        config.parents[1] / "artifacts" / "metrics" / "baseline_summary.csv"
+    ).exists()
+
+
 def test_failed_run_records_status_without_metrics_or_summary_row(tmp_path: Path) -> None:
     config = _project_config(tmp_path)
     dependencies = _fake_dependencies([])
@@ -1067,6 +1139,27 @@ def test_validator_rejects_missing_convnext_memory_note_evidence(
     notes = notes_path.read_text(encoding="utf-8")
     assert removed_line in notes
     notes_path.write_text(notes.replace(removed_line + "\n", ""), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="complete final run|memory exception"):
+        baseline_cli.validate_phase5_artifacts(root)
+
+
+@pytest.mark.parametrize("mutation", ["duplicate", "contradiction", "reorder"])
+def test_validator_rejects_nonexact_convnext_memory_note_block(
+    tmp_path: Path, mutation: str
+) -> None:
+    root, runs = _four_final_runs(tmp_path)
+    notes_path = runs["convnext_tiny"] / "notes.md"
+    lines = notes_path.read_text(encoding="utf-8").splitlines()
+    expected = EXPECTED_CONVNEXT_MEMORY_NOTE_LINES
+    start = lines.index(expected[0])
+    if mutation == "duplicate":
+        lines.insert(start, expected[0])
+    elif mutation == "contradiction":
+        lines.insert(start + len(expected), "Memory exception reason: contradictory")
+    else:
+        lines[start : start + len(expected)] = list(reversed(expected))
+    notes_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     with pytest.raises(ValueError, match="complete final run|memory exception"):
         baseline_cli.validate_phase5_artifacts(root)
