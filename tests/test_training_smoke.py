@@ -17,11 +17,31 @@ from torch import nn
 from torch.utils.data import DataLoader, Dataset
 
 from bone_cancer_ai.data.transforms import RadiographTransform
+from bone_cancer_ai.training.amp import build_grad_scaler
 from bone_cancer_ai.training.callbacks import EarlyStopping
 from bone_cancer_ai.training.checkpointing import load_checkpoint, save_checkpoint
 from bone_cancer_ai.training.optimizer import build_optimizer, class_weight_from_frame
 from bone_cancer_ai.training.scheduler import build_scheduler
 from bone_cancer_ai.training.trainer import BinaryTrainer
+
+
+def test_cuda_grad_scaler_uses_finite_baseline_smoke_scale(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_grad_scaler(**kwargs):
+        captured.update(kwargs)
+        return object()
+
+    monkeypatch.setattr(torch.amp, "GradScaler", fake_grad_scaler)
+
+    build_grad_scaler(torch.device("cuda"), requested=True)
+
+    assert captured == {
+        "device": "cuda",
+        "enabled": True,
+        "init_scale": 256.0,
+        "growth_interval": 100000,
+    }
 
 
 class TinyBinaryModel(nn.Module):
