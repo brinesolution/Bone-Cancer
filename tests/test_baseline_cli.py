@@ -659,6 +659,9 @@ def test_convnext_run_rejects_tampered_memory_evidence_before_training(tmp_path:
         ("copy", "delete"),
         ("copy", "tamper"),
         ("record", "tamper"),
+        ("record", "delete_reason"),
+        ("record", "delete_evidence_sha256"),
+        ("record", "delete_exception"),
     ],
 )
 def test_convnext_revalidates_memory_evidence_after_fit_before_publication(
@@ -666,7 +669,8 @@ def test_convnext_revalidates_memory_evidence_after_fit_before_publication(
 ) -> None:
     config = _project_config(tmp_path)
     _write_model_config(config, "convnext_tiny")
-    dependencies = _fake_dependencies([])
+    events: list[str] = []
+    dependencies = _fake_dependencies(events)
 
     class EvidenceMutatingTrainer(_FakeTrainer):
         def __init__(self, model, **kwargs) -> None:
@@ -676,7 +680,12 @@ def test_convnext_revalidates_memory_evidence_after_fit_before_publication(
         def fit(self, train_loader, val_loader):
             result = super().fit(train_loader, val_loader)
             if target == "record":
-                self.record["memory_exception"]["reason"] = "contradictory reason"
+                if action == "tamper":
+                    self.record["memory_exception"]["reason"] = "contradictory reason"
+                elif action == "delete_exception":
+                    del self.record["memory_exception"]
+                else:
+                    del self.record["memory_exception"][action.removeprefix("delete_")]
                 return result
             path = (
                 self.directory / "memory_exception_evidence.json"
@@ -694,13 +703,67 @@ def test_convnext_revalidates_memory_evidence_after_fit_before_publication(
 
     dependencies.trainer_type = EvidenceMutatingTrainer
 
-    with pytest.raises((FileNotFoundError, ValueError), match="memory exception|evidence"):
+    with pytest.raises(ValueError, match="memory exception|evidence"):
         baseline_cli.run_baseline(config, dependencies=dependencies)
 
     run = next(
         (config.parents[1] / "experiments" / "baselines" / "convnext_tiny").iterdir()
     )
     assert "Status: Failed" in run.joinpath("notes.md").read_text(encoding="utf-8")
+    for result_name in (
+        "metrics.json",
+        "history.csv",
+        "confusion_matrix.csv",
+        "test_predictions.csv",
+        "best_checkpoint_path.txt",
+    ):
+        assert not run.joinpath(result_name).exists()
+    assert not (
+        config.parents[1] / "artifacts" / "metrics" / "baseline_summary.csv"
+    ).exists()
+    assert events == [
+        "setup",
+        "loader:fit_train",
+        "loader:val",
+        "loader:test",
+        "fit",
+    ]
+
+
+def test_convnext_second_evidence_gate_catches_tamper_after_complete_notes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = _project_config(tmp_path)
+    _write_model_config(config, "convnext_tiny")
+    events: list[str] = []
+    original_write_notes = baseline_cli._write_notes
+
+    def write_notes_then_tamper(path, resolved, *, status, detail):
+        original_write_notes(path, resolved, status=status, detail=detail)
+        if status == "Complete":
+            path.parent.joinpath("memory_exception_evidence.json").write_text(
+                "{}\n", encoding="utf-8"
+            )
+
+    monkeypatch.setattr(baseline_cli, "_write_notes", write_notes_then_tamper)
+
+    with pytest.raises(ValueError, match="memory exception evidence copy"):
+        baseline_cli.run_baseline(config, dependencies=_fake_dependencies(events))
+
+    run = next(
+        (config.parents[1] / "experiments" / "baselines" / "convnext_tiny").iterdir()
+    )
+    assert "Status: Failed" in run.joinpath("notes.md").read_text(encoding="utf-8")
+    assert events == [
+        "setup",
+        "loader:fit_train",
+        "loader:val",
+        "loader:test",
+        "fit",
+        "load_best",
+        "predict:val",
+        "predict:test",
+    ]
     for result_name in (
         "metrics.json",
         "history.csv",

@@ -868,6 +868,22 @@ def _write_notes(path: Path, resolved: Mapping[str, Any], *, status: str, detail
     )
 
 
+def _write_failure_notes(
+    path: Path, validated_snapshot: Mapping[str, Any], *, detail: str
+) -> None:
+    """Record failure without allowing note rendering to replace the original error."""
+
+    try:
+        _write_notes(path, validated_snapshot, status="Failed", detail=detail)
+    except Exception:
+        try:
+            path.write_text(
+                f"Status: Failed\n{detail}\n", encoding="utf-8", newline="\n"
+            )
+        except OSError:
+            pass
+
+
 def _prediction_frame(prediction: Mapping[str, Any]) -> Any:
     import pandas as pd
     import torch
@@ -947,6 +963,7 @@ def run_baseline(
     project_root = Path(runtime["project_root"])
     run_dir = _new_run_directory(Path(runtime["output_root"]), str(record["model"]))
     notes_path = run_dir / "notes.md"
+    failure_note_snapshot = json.loads(json.dumps(record))
 
     try:
         _copy_memory_exception_evidence(run_dir, record, project_root)
@@ -983,6 +1000,10 @@ def run_baseline(
         )
         dependencies.cuda_reset_peak()
         fit_result = trainer.fit(train_loader, val_loader)
+        publication_note_lines = notes_path.read_text(encoding="utf-8").splitlines()
+        _validate_memory_exception_bundle(
+            run_dir, record, project_root, publication_note_lines
+        )
         best_path = run_dir / "best.pt"
         dependencies.load_checkpoint(
             best_path,
@@ -1029,10 +1050,6 @@ def run_baseline(
             },
             "resources": resources,
         }
-        publication_note_lines = notes_path.read_text(encoding="utf-8").splitlines()
-        _validate_memory_exception_bundle(
-            run_dir, record, project_root, publication_note_lines
-        )
         atomic_write_csv(pd.DataFrame(fit_result["history"]), run_dir / "history.csv")
         atomic_write_csv(
             confusion_matrix_frame(test_metrics), run_dir / "confusion_matrix.csv"
@@ -1068,12 +1085,12 @@ def run_baseline(
             "to preserve effective batch size before considering a resolution change."
         )
         _remove_result_files(run_dir)
-        _write_notes(notes_path, record, status="Failed", detail=guidance)
+        _write_failure_notes(notes_path, failure_note_snapshot, detail=guidance)
         raise torch.cuda.OutOfMemoryError(f"{error}. {guidance}") from error
     except Exception as error:
         _remove_result_files(run_dir)
         detail = f"{type(error).__name__}: {str(error).splitlines()[0][:500]}"
-        _write_notes(notes_path, record, status="Failed", detail=detail)
+        _write_failure_notes(notes_path, failure_note_snapshot, detail=detail)
         raise
 
 
@@ -1091,6 +1108,13 @@ def _validate_memory_exception_bundle(
     note_lines: list[str],
 ) -> None:
     memory_exception = config.get("memory_exception")
+    if config.get("model") == "convnext_tiny":
+        if not isinstance(memory_exception, Mapping) or not _strict_equal(
+            memory_exception, CONVNEXT_MEMORY_EXCEPTION
+        ):
+            raise ValueError("memory exception record does not match the approved evidence")
+    elif memory_exception is not None:
+        raise ValueError("memory exception record is only approved for convnext_tiny")
     expected_note_lines = _memory_exception_note_lines(config)
     actual_note_lines = [
         line for line in note_lines if line.startswith(MEMORY_EXCEPTION_NOTE_PREFIXES)
@@ -1099,12 +1123,6 @@ def _validate_memory_exception_bundle(
         raise ValueError("memory exception notes are missing, reordered, or tampered")
     if memory_exception is None:
         return
-    if not isinstance(memory_exception, Mapping):
-        raise ValueError("memory exception record is malformed")
-    if config.get("model") != "convnext_tiny" or not _strict_equal(
-        memory_exception, CONVNEXT_MEMORY_EXCEPTION
-    ):
-        raise ValueError("memory exception record does not match the approved evidence")
     data = config.get("data")
     if not (
         config.get("batch_size") == memory_exception["microbatch_size"]
