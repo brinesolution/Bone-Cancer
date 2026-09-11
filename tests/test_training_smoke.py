@@ -25,7 +25,7 @@ from bone_cancer_ai.training.scheduler import build_scheduler
 from bone_cancer_ai.training.trainer import BinaryTrainer
 
 
-def test_cuda_grad_scaler_uses_efficientnet_safe_baseline_scale(monkeypatch) -> None:
+def test_cuda_grad_scaler_uses_four_model_safe_baseline_scale(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
     def fake_grad_scaler(**kwargs):
@@ -39,7 +39,7 @@ def test_cuda_grad_scaler_uses_efficientnet_safe_baseline_scale(monkeypatch) -> 
     assert captured == {
         "device": "cuda",
         "enabled": True,
-        "init_scale": 64.0,
+        "init_scale": 16.0,
         "growth_interval": 100000,
     }
 
