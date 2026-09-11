@@ -117,6 +117,18 @@ FINAL_POLICY = {
     "selection_split": "val",
     "selection_metric": "AUROC",
 }
+MEASURED_MEMORY_EXCEPTIONS = {
+    "convnext_tiny": {
+        "microbatch_size": 4,
+        "gradient_accumulation_steps": 2,
+        "effective_batch_size": 8,
+        "reason": "batch_size=8 exceeded the Windows commit limit twice",
+        "evidence": [
+            "logs/phase5_final_convnext_tiny_clean.log",
+            "logs/phase5_final_convnext_tiny_clean_retry2.log",
+        ],
+    }
+}
 PREPROCESSING_POLICY = {
     "preserve_aspect_ratio": True,
     "pad_to_square": True,
@@ -417,19 +429,36 @@ def _load_verified_schema(path: Path) -> tuple[dict[str, Any], str]:
 def is_final_run_config(config: Mapping[str, Any]) -> bool:
     """Return whether a sanitized run record matches the exact Phase 5 policy."""
     data = config.get("data")
+    expected_policy = dict(FINAL_POLICY)
+    expected_loader_policy = dict(LOADER_POLICY)
+    expected_exception = MEASURED_MEMORY_EXCEPTIONS.get(config.get("model"))
+    if expected_exception is not None:
+        expected_policy["batch_size"] = expected_exception["microbatch_size"]
+        expected_policy["gradient_accumulation_steps"] = expected_exception[
+            "gradient_accumulation_steps"
+        ]
+        expected_loader_policy["batch_size"] = expected_exception["microbatch_size"]
     return bool(
         config.get("smoke_overrides") == {}
-        and all(_strict_equal(config.get(key), value) for key, value in FINAL_POLICY.items())
+        and all(_strict_equal(config.get(key), value) for key, value in expected_policy.items())
+        and (
+            _strict_equal(config.get("memory_exception"), expected_exception)
+            if expected_exception is not None
+            else "memory_exception" not in config
+        )
         and config.get("schema_sha256") == EXPECTED_SCHEMA_SHA256
         and isinstance(data, Mapping)
         and _strict_equal(data.get("preprocessing"), PREPROCESSING_POLICY)
         and _strict_equal(data.get("augmentation"), AUGMENTATION_POLICY)
-        and _strict_equal(data.get("loader"), LOADER_POLICY)
+        and _strict_equal(data.get("loader"), expected_loader_policy)
     )
 
 
 def _is_sanitized_run_record(config: Mapping[str, Any], alias: str) -> bool:
-    if set(config) != RECORD_CONFIG_KEYS:
+    expected_keys = RECORD_CONFIG_KEYS | (
+        {"memory_exception"} if alias in MEASURED_MEMORY_EXCEPTIONS else set()
+    )
+    if set(config) != expected_keys:
         return False
     expected_paths = {
         "project_root": ".",
@@ -605,6 +634,13 @@ def resolve_config(
     record["schema_sha256"] = schema_sha256
     record["pretrained"] = True if pretrained_override is None else pretrained_override
     record["limit_batches"] = limit_batches
+    memory_exception = MEASURED_MEMORY_EXCEPTIONS.get(model)
+    if memory_exception is not None:
+        record["batch_size"] = memory_exception["microbatch_size"]
+        record["gradient_accumulation_steps"] = memory_exception[
+            "gradient_accumulation_steps"
+        ]
+        record["memory_exception"] = json.loads(json.dumps(memory_exception))
     smoke_overrides: dict[str, object] = {}
     if epochs_override is not None:
         record["epochs"] = epochs_override
@@ -727,6 +763,20 @@ def _write_git_state(path: Path, project_root: Path) -> None:
 def _write_notes(path: Path, resolved: Mapping[str, Any], *, status: str, detail: str) -> None:
     overrides = resolved["smoke_overrides"]
     run_kind = resolved["run_type"]
+    memory_exception = resolved.get("memory_exception")
+    memory_lines = (
+        [
+            "Memory exception: "
+            f"microbatch_size={memory_exception['microbatch_size']}, "
+            "gradient_accumulation_steps="
+            f"{memory_exception['gradient_accumulation_steps']}, "
+            f"effective_batch_size={memory_exception['effective_batch_size']}",
+            f"Memory exception reason: {memory_exception['reason']}",
+            "Memory exception evidence: " + ", ".join(memory_exception["evidence"]),
+        ]
+        if isinstance(memory_exception, Mapping)
+        else []
+    )
     path.write_text(
         "\n".join(
             [
@@ -737,6 +787,7 @@ def _write_notes(path: Path, resolved: Mapping[str, Any], *, status: str, detail
                 "Selection uses validation AUROC at a fixed probability threshold of 0.5.",
                 "The test split is untouched during fitting and test is evaluated once "
                 "after loading best.pt.",
+                *memory_lines,
                 detail,
             ]
         )

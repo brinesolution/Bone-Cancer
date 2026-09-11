@@ -195,6 +195,29 @@ def test_default_config_is_a_cuda_amp_pretrained_full_run(tmp_path: Path) -> Non
     assert resolved["smoke_overrides"] == {}
 
 
+def test_convnext_measured_memory_exception_preserves_effective_batch(tmp_path: Path) -> None:
+    config = _project_config(tmp_path)
+    _write_yaml(config, {"model": "convnext_tiny", "common_config": "train.yaml"})
+
+    resolved = baseline_cli.resolve_config(config)["record"]
+
+    assert resolved["batch_size"] == 4
+    assert resolved["gradient_accumulation_steps"] == 2
+    assert resolved["data"]["loader"]["batch_size"] == 4
+    assert resolved["memory_exception"] == {
+        "microbatch_size": 4,
+        "gradient_accumulation_steps": 2,
+        "effective_batch_size": 8,
+        "reason": "batch_size=8 exceeded the Windows commit limit twice",
+        "evidence": [
+            "logs/phase5_final_convnext_tiny_clean.log",
+            "logs/phase5_final_convnext_tiny_clean_retry2.log",
+        ],
+    }
+    assert resolved["run_type"] == "final"
+    assert baseline_cli.is_final_run_config(resolved) is True
+
+
 @pytest.mark.parametrize("missing_key", ["project_root", "dataset_root", "schema_path"])
 def test_data_config_requires_boundary_paths(tmp_path: Path, missing_key: str) -> None:
     config = _project_config(tmp_path)
@@ -304,7 +327,7 @@ class _FakeDataModule:
 
     def __init__(self, split_dir, data_config, label_schema) -> None:
         assert Path(split_dir).name == "splits"
-        assert data_config["loader"]["batch_size"] == 8
+        assert data_config["loader"]["batch_size"] in {4, 8}
         assert label_schema["binary"]["enabled"] is True
         self.frames = {
             "fit_train": pd.DataFrame(
@@ -470,6 +493,23 @@ def test_successful_runs_are_unique_complete_and_never_use_test_for_selection(
     assert summary.iloc[0]["AUROC"] == pytest.approx(0.9)
     predictions = pd.read_csv(first / "test_predictions.csv")
     assert predictions["logit"].tolist() == [-4.0, 4.0]
+
+
+def test_convnext_run_persists_measured_memory_exception_evidence(tmp_path: Path) -> None:
+    config = _project_config(tmp_path)
+    _write_yaml(config, {"model": "convnext_tiny", "common_config": "train.yaml"})
+
+    run = baseline_cli.run_baseline(config, dependencies=_fake_dependencies([]))
+
+    persisted = yaml.safe_load(run.joinpath("config.yaml").read_text(encoding="utf-8"))
+    assert persisted["memory_exception"]["effective_batch_size"] == 8
+    notes = run.joinpath("notes.md").read_text(encoding="utf-8")
+    assert (
+        "Memory exception: microbatch_size=4, gradient_accumulation_steps=2, "
+        "effective_batch_size=8" in notes
+    )
+    assert "logs/phase5_final_convnext_tiny_clean.log" in notes
+    assert "logs/phase5_final_convnext_tiny_clean_retry2.log" in notes
 
 
 def test_failed_run_records_status_without_metrics_or_summary_row(tmp_path: Path) -> None:
@@ -860,6 +900,17 @@ def test_validator_rejects_schema_digest_tampering(tmp_path: Path) -> None:
     config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     assert config["schema_sha256"] == baseline_cli.EXPECTED_SCHEMA_SHA256
     config["schema_sha256"] = "0" * 64
+    _write_yaml(config_path, config)
+
+    with pytest.raises(ValueError, match="complete final run|final policy"):
+        baseline_cli.validate_phase5_artifacts(root)
+
+
+def test_validator_rejects_convnext_memory_exception_tampering(tmp_path: Path) -> None:
+    root, runs = _four_final_runs(tmp_path)
+    config_path = runs["convnext_tiny"] / "config.yaml"
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    config["memory_exception"]["effective_batch_size"] = 7
     _write_yaml(config_path, config)
 
     with pytest.raises(ValueError, match="complete final run|final policy"):
