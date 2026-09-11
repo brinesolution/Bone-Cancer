@@ -1,6 +1,6 @@
 # Phase 5 Standard Comparison Baselines Work Notes
 
-**Status:** IDEA / PLAN / DESIGN complete; BUILD in progress.
+**Status:** COMPLETE — implementation, real runs, review and verification passed.
 
 **Authoritative source:** `BONE_CANCER_10_PHASE_BUILD_DIRECTIVE.md`, Sections 10–12 and Phase 5. Detailed execution plan: `docs/superpowers/plans/2026-09-10-phase-5-baselines.md`.
 
@@ -23,6 +23,6 @@ Phase 5 establishes fair empirical reference models before HOSP-BoneNet is optim
 - [x] Task 2: binary metrics, latency/report writers and tests.
 - [x] Task 3: shared AMP trainer/checkpoints/early stopping and synthetic overfit tests.
 - [x] Task 4: CLI, run bundles, summary aggregation and orchestration tests.
-- [ ] Task 5: sequential real training, independent review, verification, documentation and handoff.
+- [x] Task 5: sequential real training, independent review, verification, documentation and handoff.
 
-The user explicitly authorized Phase 5 under the master directive and selected the recommended SOL route. The directive already approves the architecture, model list, settings, fairness contract and acceptance criteria, so implementation proceeds without a second design decision. The repository is clean on the existing non-main `phase1-scaffold` branch at commit `7282c0f`; work remains in the user-specified project root.
+Executed results are in `artifacts/metrics/baseline_summary.csv`; full run, source and split verification is in `logs/phase5_*`. All four final bundles passed, 316 tests passed, and independent review found no Critical/Important issue.

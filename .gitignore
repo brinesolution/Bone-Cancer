@@ -2,6 +2,7 @@
 /dataset/*
 !/dataset/README.md
 .venv/
+.idea/
 __pycache__/
 *.py[cod]
 *.egg-info/

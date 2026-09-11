@@ -1,28 +1,17 @@
-# src/bone_cancer_ai/models/baselines
+# Baseline Models
 
-## Purpose
-One configurable timm classifier for fair comparisons.
+Purpose: One configurable binary classifier for all four fair Phase 5 comparisons.
 
-## Files
-timm_classifier.py: timm classifier scaffold; factory.py: factory scaffold.
+Files:
+- `timm_classifier.py` — `TimmClassifier` with one binary logit.
+- `factory.py` — validated construction and parameter counting.
 
-## Inputs
-verified class counts/backbone config.
+Models: DenseNet121, EfficientNet-B3, ConvNeXt-Tiny, Swin-Tiny.
 
-## Outputs
-Pending Phase 5: binary logits.
+Main libraries: PyTorch, timm.
 
-## Main Libraries
-None used by current docstring-only modules.
+Flow: registry specification → timm backbone → `[B]` logits.
 
-## Important Functions / Classes
-Implementation and interfaces are Pending Phase 5; __init__.py is a package marker.
+Run: `\.venv\Scripts\python.exe scripts\09_train_baseline.py --config configs\baseline_<model>.yaml`
 
-## Theory
-Identical preprocessing and training budgets make comparisons interpretable.
-
-## Execution
-Pending Phase 5; see root guide.
-
-## Notes
-Do not edit generated records manually. Keep original dataset files untouched. Future-phase scaffolds are not completed functionality; update this README when implementation becomes active.
+Model aliases and output shape are fixed by tests; do not fork architecture-specific trainers.

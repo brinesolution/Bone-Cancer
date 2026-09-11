@@ -1,28 +1,17 @@
-# experiments/baselines
+# Baseline Experiments
 
-## Purpose
-Four baseline runs.
+Purpose: Real Phase 5 runs for the four approved reference models.
 
-## Files
-README.md: folder contract; no produced files yet.
+Folders:
+- `densenet121/`
+- `efficientnet_b3/`
+- `convnext_tiny/`
+- `swin_tiny/`
 
-## Inputs
-Verified inputs from the owning phase.
+Each final run uses seed 42, 384-pixel inputs and validation-AUROC selection. ConvNeXt uses the recorded 4×2 memory exception; every effective batch equals 8.
 
-## Outputs
-No outputs yet.
+Summary: `artifacts/metrics/baseline_summary.csv`.
 
-## Main Libraries
-None in Phase 1.
+Validate: `.\scripts\run_phase.ps1 -Action phase5`
 
-## Important Functions / Classes
-No functions in this output folder; parent README identifies producers.
-
-## Theory
-Pending Phase 5; one common pipeline and comparable budgets.
-
-## Execution
-Pending owning phase; see parent README.
-
-## Notes
-Do not edit generated records manually. Keep original dataset files untouched. Future-phase scaffolds are not completed functionality; update this README when implementation becomes active.
+Failed/smoke runs are evidence only and cannot populate the final summary.

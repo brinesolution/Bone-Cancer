@@ -1,28 +1,15 @@
-# experiments
+# Experiments
 
-## Purpose
-Unique experiment directories.
+Purpose: Immutable, uniquely named outputs from executed model runs.
 
-## Files
-baselines/: standard comparisons; hosp_bonenet/: primary model; ablations/: component studies; tuning/: bounded search.
+Folders:
+- `baselines/` — four Phase 5 model families and run bundles.
+- `hosp_bonenet/`, `ablations/`, `tuning/` — later-phase outputs.
 
-## Inputs
-Future frozen per-run config, verified manifests and seeds.
+Each complete run contains config, environment/Git evidence, history, best/last checkpoints, predictions, confusion matrix, metrics and notes.
 
-## Outputs
-No runs; later config/environment/revision/history/checkpoint paths.
+Flow: resolved config + verified manifests → training → immutable run directory.
 
-## Main Libraries
-None in Phase 1.
+Run: `\.venv\Scripts\python.exe scripts\09_train_baseline.py --config <config>`
 
-## Important Functions / Classes
-Training orchestration is Pending Phase 5/7.
-
-## Theory
-Each run is unique; validation selects checkpoints and test is reserved.
-
-## Execution
-Pending training phases.
-
-## Notes
-Do not edit generated records manually. Keep original dataset files untouched. Future-phase scaffolds are not completed functionality; update this README when implementation becomes active.
+Do not rename, overwrite or manually edit run artifacts.

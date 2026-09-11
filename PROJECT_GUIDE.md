@@ -1,10 +1,10 @@
 # Project guide
 
-Phases 1–4 establish the environment, audited data inventory, leakage-controlled manifests, deterministic DataLoaders and a working annotation workflow. Phase 5 and later model/training descriptions remain approved design rather than completed functionality.
+Phases 1–5 establish the environment, audited data, leakage-controlled loaders, annotation workflow, and four executed comparison baselines. Phase 6 onward remains pending.
 
 ## 1. Project Overview
 
-HOSP-BoneNet is the single proposed model. Ten acceptance-gated phases build this repository. Phase 1 provides environment and infrastructure; all training and model metrics are Not run.
+HOSP-BoneNet is the single proposed model. Ten acceptance-gated phases build this repository; the four Phase 5 baselines provide real seed-42 references before HOSP-BoneNet implementation.
 
 ## 2. Problem Definition
 
@@ -56,7 +56,7 @@ Exact bytes alone do not establish drawing agreement: duplicate source JSONs mus
 
 ## 12. Baseline Models
 
-Pending Phase 5. DenseNet121 connects earlier features to later blocks; EfficientNet-B3 scales depth/width/resolution; ConvNeXt-Tiny is a modern convolutional encoder; Swin-Tiny uses hierarchical windowed attention. One timm classifier and common training/evaluation enforce fair comparison. Verify Swin resolution/window compatibility during implementation.
+Phase 5 uses one `TimmClassifier` and registry for DenseNet121, EfficientNet-B3, ConvNeXt-Tiny and Swin-Tiny. All use the same 384-pixel inputs, manifests, augmentation, loss, metrics, seed 42, validation-AUROC selection and effective batch 8. ConvNeXt alone uses measured microbatch 4 with accumulation 2 after two recorded batch-8 host-memory failures; the others use batch 8 directly.
 
 ## 13. HOSP-BoneNet Architecture
 
@@ -96,19 +96,19 @@ Pending calibration data and trained models. Hold out a grouped subset of offici
 
 ## 22. Loss Functions
 
-Pending Phase 5/6. BCE/cross-entropy penalizes classification errors; focal loss emphasizes hard examples; Dice measures mask overlap; grounding penalizes concept activation outside verified regions. Sum supported losses with missing-label masks. Unavailable supervision supplies no invented targets.
+Phase 5 uses fit-only weighted binary cross-entropy with invalid samples excluded. Phase 6 adds only losses supported by verified labels; unavailable supervision supplies no invented targets.
 
 ## 23. Training Loop
 
-Pending Phase 5/7. Defaults: 40 epochs, AdamW at 1e-4, weight decay 1e-4, cosine schedule, two warmup epochs, AMP, gradient clipping and early stopping. Verify CUDA and a synthetic forward/backward first. Reduce batch size then accumulate gradients before reducing resolution on OOM. Never silently run long training on CPU.
+The shared trainer uses AdamW at 1e-4, weight decay 1e-4, cosine scheduling, two warmup epochs, AMP, gradient clipping, a 40-epoch cap and patience 8. Validation AUROC selects checkpoints. CUDA is mandatory for final runs; memory exceptions preserve effective batch size.
 
 ## 24. Checkpointing
 
-Pending Phase 5/7. Unique runs record config, environment, Git revision, history and checkpoint paths. Save best.pt and last.pt without overwriting another run. Select using predefined validation metrics, never test performance.
+Each immutable run records resolved config, environment, Git state, history, `best.pt`, `last.pt`, predictions and metrics. Checkpoints validate model/config identity before mutation and support exact resume state. Test evaluation occurs only after loading the validation-selected best checkpoint.
 
 ## 25. Evaluation Metrics
 
-Pending predictions. AUROC assesses ranking; AUPRC emphasizes positive retrieval; balanced accuracy averages recalls; F1 balances precision/recall; MCC summarizes the confusion matrix. Sensitivity/specificity measure positive/negative recall. Dice/IoU require spatial labels; Brier/ECE assess calibration. Clinical class names require verified meanings.
+Seed-42 test results are: DenseNet121 AUROC 0.96315/AUPRC 0.96519; EfficientNet-B3 0.97810/0.97612; ConvNeXt-Tiny 0.96401/0.96394; Swin-Tiny 0.96517/0.96355. See `artifacts/metrics/baseline_summary.csv` for balanced accuracy, F1, sensitivity, specificity, MCC, parameters and measured latency. These are single-split research results; multi-seed and clinical validation are Pending/Unavailable.
 
 ## 26. Explainability
 
@@ -116,7 +116,7 @@ Pending Phase 9. Generate lesion probabilities, Grad-CAM/Grad-CAM++ and supporte
 
 ## 27. Inference Pipeline
 
-Pending Phase 9/10. Validate input, apply frozen preprocessing, load a selected checkpoint, predict supported heads, calibrate/reject and return results/overlays. Work without labels and expose no ground truth. No checkpoint exists yet.
+Baseline checkpoint loading and prediction are implemented. The HOSP-BoneNet inference, calibration, rejection and overlay pipeline remains pending Phase 9/10.
 
 ## 28. Streamlit Demo
 
@@ -124,7 +124,7 @@ Pending Phase 10. Upload, validate, predict, show calibrated confidence/abstenti
 
 ## 29. How to Run Each Phase
 
-Phase 1 environment: `python scripts/00_verify_environment.py`. Phase 2 audit: scripts 01–03 or `./scripts/run_phase.ps1 -Action phase2`. Phase 3 pipeline: scripts 04 and 06 or `./scripts/run_phase.ps1 -Action phase3`; script 05 provides an optional bounded/full cache. Validation: `python -m pytest -q`, `python -m ruff check .`, and `python -m compileall -q src scripts app tools`. Scripts 07–15 remain inactive until their phases.
+Phase 1 environment: `python scripts/00_verify_environment.py`. Phase 2 audit: scripts 01–03. Phase 3 data: scripts 04–06. Phase 4 annotations: scripts 07–08. Phase 5 training: `python scripts/09_train_baseline.py --config configs/baseline_<model>.yaml`; validate with `./scripts/run_phase.ps1 -Action phase5`. Always use `.venv` and run pytest, Ruff and compileall after changes.
 
 ## 30. Common Errors and Troubleshooting
 
@@ -132,4 +132,4 @@ For initial creation when `py -3.11` cannot resolve uv Python, use `uv venv --py
 
 ## 31. Team Review Study Notes
 
-Member 1: study manifest contracts, SHA/pHash/canonical evidence and why connected groups cannot cross partitions. Member 2: study the BTXRD workbook, the one subtype conflict and Phase 4 spatial validation. Member 3: study aspect padding, transforms, DataLoader masks and keep all baselines on the same fit/validation/test manifests. Member 4: keep HOSP-BoneNet optional heads masked/disabled according to coverage and reserve calibration for uncertainty work. Phase 3 uses Pillow, OpenCV, Albumentations, NumPy, Pandas, scikit-learn, PyTorch and Matplotlib. Audit/QA figures show data behavior only; no model metric, radiologist review or clinical verification has been produced.
+Member 1: study duplicate grouping and split invariants. Member 2: study Phase 4 annotation validity and conflicts. Member 3: study preprocessing, the shared baseline trainer and saved metrics. Member 4: keep HOSP-BoneNet heads gated by verified coverage and reserve calibration for uncertainty work. Phase 5 metrics are executed model results; radiologist/pathology verification remains Unavailable.

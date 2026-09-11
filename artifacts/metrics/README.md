@@ -1,28 +1,16 @@
-# artifacts/metrics
+# Metrics
 
-## Purpose
-Executed evaluation metrics.
+Purpose: Machine-readable metrics produced by executed evaluations.
 
-## Files
-README.md: folder contract; no produced files yet.
+Files:
+- `baseline_summary.csv` — one validated seed-42 row per approved baseline.
 
-## Inputs
-Verified inputs from the owning phase.
+Columns include AUROC, AUPRC, balanced accuracy, F1, sensitivity, specificity, MCC, parameters and latency.
 
-## Outputs
-No outputs yet.
+Flow: complete run `metrics.json` → strict validation → atomic summary update.
 
-## Main Libraries
-None in Phase 1.
+Validate: `.\scripts\run_phase.ps1 -Action phase5`
 
-## Important Functions / Classes
-No functions in this output folder; parent README identifies producers.
+Per-run Brier/ECE, confusion matrices and predictions remain in `experiments/baselines/`.
 
-## Theory
-Not run; no synthetic accuracy/AUROC tables.
-
-## Execution
-Pending owning phase; see parent README.
-
-## Notes
-Do not edit generated records manually. Keep original dataset files untouched. Future-phase scaffolds are not completed functionality; update this README when implementation becomes active.
+Do not edit values manually; use `Not run`, `Pending` or `Unavailable` when appropriate.

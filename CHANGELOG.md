@@ -1,5 +1,7 @@
 # Changelog
 
+2026-09-12 — Completed four shared-pipeline seed-42 baselines with real checkpoints/metrics, strict artifact validation, an evidenced ConvNeXt 4×2 memory exception, and preserved source/splits.
+
 ## 2026-09-10 — Phase 4 verified
 
 - Added local Streamlit metadata review with unknown-aware controls, actual reviewer/status/notes, autosave, optimistic SQLite revisions, navigation, progress and master CSV export.

@@ -1,28 +1,16 @@
-# src/bone_cancer_ai/training
+# Training
 
-## Purpose
-Common configurable training engine.
+Purpose: Shared AMP training, validation selection, checkpointing and deterministic resume.
 
-## Files
-trainer.py: trainer scaffold; callbacks.py: callbacks scaffold; checkpointing.py: checkpointing scaffold; optimizer.py: optimizer scaffold; scheduler.py: scheduler scaffold; amp.py: amp scaffold.
+Files:
+- `trainer.py` — masked binary fit/predict loop.
+- `amp.py`, `optimizer.py`, `scheduler.py` — numerical and optimization policy.
+- `callbacks.py`, `checkpointing.py` — early stopping and safe best/last state.
 
-## Inputs
-verified splits/config/model.
+Main libraries: PyTorch.
 
-## Outputs
-Pending Phase 5/7: unique runs and real checkpoints.
+Flow: fit loader → weighted BCE/AdamW → validation AUROC → `best.pt`/`last.pt`.
 
-## Main Libraries
-None used by current docstring-only modules.
+Defaults: CUDA AMP, 40 epochs, patience 8, seed 42, effective batch 8.
 
-## Important Functions / Classes
-Implementation and interfaces are Pending Phase 5/7; __init__.py is a package marker.
-
-## Theory
-Validation selects checkpoints; test never guides training.
-
-## Execution
-Pending Phase 5/7; see root guide.
-
-## Notes
-Do not edit generated records manually. Keep original dataset files untouched. Future-phase scaffolds are not completed functionality; update this README when implementation becomes active.
+Test data is evaluated only after the best validation checkpoint is selected.
