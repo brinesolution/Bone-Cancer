@@ -1,21 +1,27 @@
-status: pending_phase_6
+status: phase_6_architecture
 train_config: train.yaml
 data_config: data.yaml
 model:
   name: hosp_bonenet
   backbone: convnext_tiny
   pretrained: true
-  num_binary_classes: null
+  feature_dim: 256
+  pyramid_channels: 128
+  dropout: 0.2
   pooling: adaptive_avg
-  localization: true
+  localization_enabled: true
   subtype_enabled: false
+  num_subtypes: 0
   risk_enabled: false
+  num_risk_classes: 0
   concepts_enabled: false
+  num_concepts: 0
 loss_weights:
   binary: 1.0
   subtype: 0.0
+  risk: 0.0
   segmentation: 0.0
   concepts: 0.0
   grounding: 0.0
   hierarchy: 0.0
-labels_verified: false
+labels_verified: true
