@@ -47,10 +47,15 @@ class BoneCancerDataModule:
         split_dir: Path,
         data_config: dict[str, Any],
         label_schema: dict[str, Any],
+        *,
+        splits: tuple[str, ...] = SPLIT_NAMES,
     ) -> None:
+        if not splits or len(set(splits)) != len(splits) or not set(splits) <= set(SPLIT_NAMES):
+            raise ValueError("splits must be a nonempty unique subset of known split names")
         self.split_dir = Path(split_dir)
         self.config = data_config
         self.label_schema = label_schema
+        self.splits = tuple(splits)
         dataset_root = self.config.get("dataset_root")
         if not dataset_root:
             raise ValueError("data_config must define dataset_root")
@@ -66,7 +71,7 @@ class BoneCancerDataModule:
         preprocessing = self.config.get("preprocessing", {})
         augmentation = self.config.get("augmentation", {})
         frames: dict[str, pd.DataFrame] = {}
-        for split in SPLIT_NAMES:
+        for split in self.splits:
             path = self.split_dir / f"{split}.csv"
             if not path.is_file():
                 raise FileNotFoundError(f"Missing split manifest: {path}")
@@ -101,10 +106,12 @@ class BoneCancerDataModule:
             raise ValueError("Split bundle has group overlap")
         if validation["official_heldout_records_assigned_to_training"]:
             raise ValueError("Split bundle moves official held-out records into training")
-        if validation["generation_mismatch"]:
+        if self.splits == SPLIT_NAMES and validation["generation_mismatch"]:
             raise ValueError("Split bundle generation fingerprint is stale or mixed")
         generation = combined["split_generation_id"].astype(str).iloc[0]
-        if generation != split_generation_id(combined):
+        if self.splits == SPLIT_NAMES and generation != split_generation_id(combined):
+            raise ValueError("Split bundle generation fingerprint is stale or mixed")
+        if combined["split_generation_id"].astype(str).nunique() != 1:
             raise ValueError("Split bundle generation fingerprint is stale or mixed")
         outside = [
             value
@@ -114,7 +121,7 @@ class BoneCancerDataModule:
         if outside:
             raise ValueError("Split manifest contains a path outside dataset_root")
 
-        for offset, split in enumerate(SPLIT_NAMES):
+        for offset, split in enumerate(self.splits):
             frame = frames[split]
             transform = RadiographTransform(
                 image_size,
@@ -166,8 +173,8 @@ class BoneCancerDataModule:
         )
 
     def loaders(self) -> dict[str, DataLoader]:
-        """Return one loader for each required final partition."""
-        return {split: self.loader(split) for split in SPLIT_NAMES}
+        """Return one loader for each configured partition."""
+        return {split: self.loader(split) for split in self.splits}
 
 
 def smoke_test_loaders(

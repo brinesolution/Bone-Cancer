@@ -1,5 +1,5 @@
 status: phase_6_verified
-train_config: train.yaml
+train_config: hosp_train.yaml
 data_config: data.yaml
 model:
   name: hosp_bonenet

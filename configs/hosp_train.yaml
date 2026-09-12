@@ -1,0 +1,41 @@
+output_root: experiments/hosp_bonenet
+image_size: 384
+microbatch_size: 4
+effective_batch_size: 8
+gradient_accumulation_steps: 2
+gradient_clip_norm: 1.0
+weight_decay: 0.0001
+scheduler: cosine
+amp: true
+seed: 42
+device: cuda
+allow_cpu_training: false
+num_workers: 0
+pin_memory: true
+persistent_workers: false
+selection_split: val
+selection_metric: AUROC
+stages:
+  A:
+    enabled: true
+    name: A_binary_global_local
+    epochs: 40
+    optimizer: adamw
+    learning_rate: 0.0001
+    warmup_epochs: 2
+    early_stopping_patience: 8
+  B:
+    enabled: false
+    reason: spatial supervision is not verified
+  C:
+    enabled: false
+    reason: optional labels are not released
+  D:
+    enabled: true
+    name: D_low_lr_finetune
+    epochs: 10
+    optimizer: adamw
+    learning_rate: 0.00001
+    warmup_epochs: 0
+    early_stopping_patience: 4
+    initialize_from: A.best

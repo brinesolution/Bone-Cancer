@@ -422,6 +422,27 @@ def _write_datamodule_split_fixtures(split_dir, image_path):
     _stamp_split_generation(split_dir)
 
 
+def test_datamodule_subset_loaders_expose_only_requested_splits(tmp_path):
+    from bone_cancer_ai.data.datamodule import BoneCancerDataModule
+
+    source = tmp_path / "dataset/Main"
+    source.mkdir(parents=True)
+    image_path = source / "image.png"
+    Image.fromarray(np.arange(64, dtype=np.uint8).reshape(8, 8)).save(image_path)
+    split_dir = tmp_path / "splits"
+    _write_datamodule_split_fixtures(split_dir, image_path)
+
+    module = BoneCancerDataModule(
+        split_dir,
+        {"dataset_root": str(source)},
+        _schema(),
+        splits=("fit_train", "val"),
+    )
+    module.setup()
+
+    assert set(module.loaders()) == {"fit_train", "val"}
+
+
 def test_datamodule_rejects_cross_split_group_and_stale_generation(tmp_path):
     from bone_cancer_ai.data.datamodule import BoneCancerDataModule
 

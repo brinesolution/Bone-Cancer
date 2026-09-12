@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 import random
+import time
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -20,6 +21,10 @@ from bone_cancer_ai.training.callbacks import EarlyStopping
 from bone_cancer_ai.training.checkpointing import load_checkpoint, save_checkpoint
 from bone_cancer_ai.training.optimizer import build_optimizer
 from bone_cancer_ai.training.scheduler import build_scheduler
+
+
+def _format_metric(value: object) -> str:
+    return "undefined" if value is None else f"{float(value):.6f}"
 
 
 class BinaryTrainer:
@@ -53,6 +58,12 @@ class BinaryTrainer:
         self.selection_metric = str(self.resolved_config.get("selection_metric", "AUROC"))
         if self.selection_metric != "AUROC":
             raise ValueError("validation AUROC is the only supported selection metric")
+        self.monitor_extended = bool(self.resolved_config.get("monitor_extended", False))
+        self.stage_name = self.resolved_config.get("stage_name")
+        if self.monitor_extended and (
+            not isinstance(self.stage_name, str) or not self.stage_name
+        ):
+            raise ValueError("stage_name must be non-empty when extended monitoring is enabled")
 
         self.device = torch.device(device)
         if self.device.type not in {"cpu", "cuda"}:
@@ -85,7 +96,7 @@ class BinaryTrainer:
         self.early_stopping = EarlyStopping(
             patience=self._positive_int("early_stopping_patience", 8)
         )
-        self.history: list[dict[str, int | float]] = []
+        self.history: list[dict[str, Any]] = []
         self.start_epoch = 1
         if resume_from is not None:
             resume_path = Path(resume_from)
@@ -246,9 +257,18 @@ class BinaryTrainer:
         return selected_images, selected_targets, selected_ids, rejected
 
     @staticmethod
-    def _normalize_logits(logits: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
+    def _normalize_logits(logits: object, targets: torch.Tensor) -> torch.Tensor:
+        if isinstance(logits, Mapping):
+            try:
+                logits = logits["binary_logits"]
+            except KeyError as error:
+                raise ValueError(
+                    "model output mapping must contain binary_logits"
+                ) from error
         if not isinstance(logits, torch.Tensor):
-            raise ValueError("model must return a tensor of binary logits")
+            raise ValueError(
+                "model must return binary logits as a tensor or in an output mapping"
+            )
         if logits.ndim == 2 and logits.shape[1] == 1:
             logits = logits[:, 0]
         if logits.ndim != 1 or logits.shape != targets.shape:
@@ -393,12 +413,20 @@ class BinaryTrainer:
         auroc = metrics["AUROC"]
         if auroc is None or not math.isfinite(float(auroc)):
             raise ValueError("validation AUROC is undefined")
-        return prediction, {
+        record = {
             "val_loss": float(loss),
             "val_AUROC": float(auroc),
             "val_valid_samples": int(prediction["valid_count"]),
             "val_rejected_samples": int(prediction["rejected_count"]),
         }
+        if self.monitor_extended:
+            record.update(
+                {
+                    "val_AUPRC": metrics["AUPRC"],
+                    "val_F1": metrics["F1"],
+                }
+            )
+        return prediction, record
 
     def _save(self, filename: str, *, epoch: int, selection_value: float) -> None:
         destination = self.checkpoint_dir / filename
@@ -431,25 +459,61 @@ class BinaryTrainer:
         if self.early_stopping.bad_epochs >= self.early_stopping.patience:
             return self._fit_result()
         for epoch in range(self.start_epoch, self.epochs + 1):
+            if self.monitor_extended and self.device.type == "cuda":
+                torch.cuda.reset_peak_memory_stats(self.device)
+                torch.cuda.synchronize(self.device)
+            epoch_started = time.perf_counter() if self.monitor_extended else None
             self._seed_epoch(train_loader, epoch)
             learning_rate = float(self.optimizer.param_groups[0]["lr"])
             train_record = self._train_epoch(train_loader)
             _prediction, validation_record = self._validation_epoch(val_loader)
+            if self.monitor_extended and self.device.type == "cuda":
+                torch.cuda.synchronize(self.device)
             selection_value = float(validation_record["val_AUROC"])
             previous_best = self.early_stopping.best_value
             should_stop = self.early_stopping.step(selection_value, epoch=epoch)
             improved = previous_best is None or selection_value > previous_best
-            record: dict[str, int | float] = {
+            record: dict[str, Any] = {
                 "epoch": epoch,
                 "learning_rate": learning_rate,
                 **train_record,
                 **validation_record,
             }
+            if self.monitor_extended:
+                record.update(
+                    {
+                        "stage": self.stage_name,
+                        "train_binary_loss": train_record["train_loss"],
+                        "val_binary_loss": validation_record["val_loss"],
+                        "epoch_time_seconds": time.perf_counter() - epoch_started,
+                        "peak_cuda_memory_bytes": (
+                            int(torch.cuda.max_memory_allocated(self.device))
+                            if self.device.type == "cuda"
+                            else 0
+                        ),
+                        "checkpoint_decision": "best" if improved else "last",
+                    }
+                )
             self.history.append(record)
             self.scheduler.step()
             self._save("last.pt", epoch=epoch, selection_value=selection_value)
             if improved:
                 self._save("best.pt", epoch=epoch, selection_value=selection_value)
+            if self.monitor_extended:
+                print(
+                    "phase7_epoch "
+                    f"stage={record['stage']} epoch={epoch}/{self.epochs} "
+                    f"train_loss={record['train_loss']:.6f} "
+                    f"val_loss={record['val_loss']:.6f} "
+                    f"val_AUROC={_format_metric(record['val_AUROC'])} "
+                    f"val_AUPRC={_format_metric(record['val_AUPRC'])} "
+                    f"val_F1={_format_metric(record['val_F1'])} "
+                    f"lr={record['learning_rate']:.8g} "
+                    f"peak_cuda_bytes={record['peak_cuda_memory_bytes']} "
+                    f"checkpoint_decision={record['checkpoint_decision']} "
+                    f"seconds={record['epoch_time_seconds']:.2f}",
+                    flush=True,
+                )
             if should_stop:
                 break
         return self._fit_result()
