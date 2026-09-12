@@ -1,6 +1,6 @@
 # Project guide
 
-Phases 1–5 establish the environment, audited data, leakage-controlled loaders, annotation workflow, and four executed comparison baselines. Phase 6 onward remains pending.
+Phases 1–6 establish the environment, audited data, leakage-controlled loaders, annotation workflow, four executed baselines, and the verified HOSP-BoneNet architecture. Full HOSP training remains pending.
 
 ## 1. Project Overview
 
@@ -60,31 +60,31 @@ Phase 5 uses one `TimmClassifier` and registry for DenseNet121, EfficientNet-B3,
 
 ## 13. HOSP-BoneNet Architecture
 
-Pending Phase 6. A shared ConvNeXt-Tiny encoder feeds global pooling, a lesion head, mask-weighted local pooling, gated fusion and supported optional concept/hierarchical heads. Calibrate open-set and conformal postprocessing on allowed partitions only.
+`HOSPBoneNet` uses a shared ConvNeXt-Tiny encoder, global pooling, a lesion FPN, mask-weighted local pooling and gated fusion. A strict factory derives optional output sizes from enabled label-schema sections. The production config enables verified binary supervision only.
 
 ## 14. Encoder
 
-Pending Phase 6. timm will expose multiscale spatial features. Early maps retain detail; later maps represent broader structure. Obtain channels and strides from the actual model API.
+`TimmFeatureEncoder` exposes the backbone's discovered multiscale channels and reductions. ConvNeXt-Tiny supplies four stages at strides 4/8/16/32; the deepest map is projected into the configured feature dimension.
 
 ## 15. Localization Head
 
-Pending Phase 6. A lightweight feature pyramid produces lesion logits [B,1,H,W]. Masks permit Dice plus BCE/focal supervision; boxes provide weak supervision. Without spatial labels, use only weak attention/consistency and claim no segmentation accuracy.
+`LocalizationHead` fuses lateral multiscale features top-down and returns lesion logits `[B,1,H,W]` aligned to the input. Current mask loss weight is zero, so these maps are classification-guided attention and have no claimed segmentation accuracy.
 
 ## 16. Mask-Weighted Local Pooling
 
-Pending Phase 6. Average spatial encoder features weighted by lesion probabilities, protecting a small denominator. This focuses a vector on a learned region; it does not prove lesion correctness.
+`MaskWeightedPool` resizes lesion probabilities to the deepest feature map and computes a protected FP32 weighted mean. It focuses local features but does not establish lesion correctness.
 
 ## 17. Concept Bottleneck
 
-Pending Phase 6. Pool per-concept activation maps into scores supervised by verified concept labels. Unavailable concepts remain disabled. Interpretation is limited by annotation coverage and validity.
+`ConceptHead` creates per-concept activation maps and pooled logits only when the schema and config enable verified concepts. The branch is currently disabled.
 
 ## 18. Global-Local Fusion
 
-Pending Phase 6. A learned gate combines vectors: fused = gate * local + (1 - gate) * global. The global path retains context; the local path emphasizes the candidate lesion. Supported concept features may be concatenated.
+`GatedFusion` implements `gate * local + (1 - gate) * global`. Enabled concept probabilities are appended before the prediction heads.
 
 ## 19. Hierarchical Prediction
 
-Pending Phase 6. Binary output becomes mandatory after label verification. Subtype/risk heads need verified classes. Consistency losses require an explicit verified class relationship; filenames cannot provide it.
+The binary head is mandatory. Subtype/risk heads appear only when enabled labels supply at least two classes. Hierarchy consistency requires an explicit subtype-to-binary relationship; its production weight remains zero.
 
 ## 20. Open-Set Recognition
 
@@ -96,7 +96,7 @@ Pending calibration data and trained models. Hold out a grouped subset of offici
 
 ## 22. Loss Functions
 
-Phase 5 uses fit-only weighted binary cross-entropy with invalid samples excluded. Phase 6 adds only losses supported by verified labels; unavailable supervision supplies no invented targets.
+`HOSPLoss` combines masked binary, subtype, risk, Dice+BCE segmentation, concept, grounding and hierarchy terms. Validity masks exclude missing targets; a requested task with valid labels but no output fails. Large AMP reductions use FP32 to prevent NaNs.
 
 ## 23. Training Loop
 

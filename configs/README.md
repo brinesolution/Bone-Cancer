@@ -4,7 +4,7 @@
 Configuration contracts.
 
 ## Files
-`data.yaml` contains immutable source paths, provenance roots, image/audit settings, clean-split policy, preprocessing, conservative augmentation and DataLoader defaults. `train.yaml`, `baseline_*.yaml`, `hosp_bonenet.yaml` and `inference.yaml` remain later-phase contracts.
+`data.yaml` owns immutable paths and data policy. `train.yaml` and `baseline_*.yaml` define the shared Phase 5 runs. `hosp_bonenet.yaml` defines the verified Phase 6 architecture and binary-only supervision gate. `inference.yaml` remains phase-gated.
 
 ## Inputs
 Approved directive, Phase 2 verified label meanings/duplicate evidence, and Phase 3 safety decisions.

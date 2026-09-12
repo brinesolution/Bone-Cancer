@@ -1,4 +1,4 @@
-status: phase_6_architecture
+status: phase_6_verified
 train_config: train.yaml
 data_config: data.yaml
 model:
@@ -24,4 +24,4 @@ loss_weights:
   concepts: 0.0
   grounding: 0.0
   hierarchy: 0.0
-labels_verified: true
+verified_supervision: [binary]

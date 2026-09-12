@@ -149,7 +149,7 @@ def test_production_config_enables_only_verified_supervision() -> None:
     model = config["model"]
     weights = config["loss_weights"]
 
-    assert config["labels_verified"] is True
+    assert config["verified_supervision"] == ["binary"]
     assert model["backbone"] == "convnext_tiny"
     assert model["pretrained"] is True
     assert model["localization_enabled"] is True

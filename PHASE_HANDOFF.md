@@ -1,34 +1,33 @@
 # Phase handoff
 
 Phase completed:
-Phase 5 — Standard Comparison Baselines
+Phase 6 — HOSP-BoneNet Implementation
 
 Important outputs:
-- Four real seed-42 final bundles under `experiments/baselines/`
-- `artifacts/metrics/baseline_summary.csv`
-- `logs/phase5_run_verification.json`
-- `logs/source_after_phase5.json`
-- `logs/phase5_split_preservation.json`
+- `src/bone_cancer_ai/models/hosp_bonenet/`
+- `src/bone_cancer_ai/losses/`
+- `configs/hosp_bonenet.yaml`
+- `artifacts/verification/phase6_tiny_overfit.json`
+- `logs/phase6_verification.json`
 
 Tests:
-- PASS — 316 pytest tests
-- PASS — Ruff, compileall, pip check
-- PASS — 4-model artifact validator, metric recomputation, best/last reload
-- PASS — source/split preservation
-- PASS — independent review; no Critical/Important findings
+- PASS — 337 pytest tests
+- PASS — 384×384 CUDA AMP forward/backward
+- PASS — 16-image overfit: loss ratio 0.1513, accuracy 1.0
+- PASS — Ruff, compileall, pip check, source/split preservation
+- CLEAN — independent review
 
 Outstanding issue:
-- Multi-seed results Pending; clinical verification Unavailable.
-- DenseNet launch is honestly recorded `dirty=true`; run integrity passed.
+- Full HOSP training/checkpoints are Pending; optional task supervision remains gated.
 
 Do not rerun:
-- Final baseline runs, Phase 2 audit, Phase 3 splits or Phase 4 conversion unless inputs/code change.
+- Phase 5 baselines, audit, splits, annotation conversion, or Phase 6 overfit unless inputs/code change.
 
 Next model:
 SOL
 
 Next phase:
-Phase 6 — HOSP-BoneNet Implementation
+Phase 7 — Full HOSP-BoneNet Training
 
 Start command:
 `Get-Content PROJECT_STATE.md`

@@ -11,6 +11,6 @@ Main libraries: PyTorch, timm.
 
 Flow: model alias → registry → model factory → logits.
 
-Run: `\.venv\Scripts\python.exe scripts\09_train_baseline.py --config configs\baseline_densenet121.yaml`
+Run: `python scripts/phase6_smoke_overfit.py` for the HOSP architecture check.
 
 Do not add competing baseline pipelines or edit generated checkpoints manually.

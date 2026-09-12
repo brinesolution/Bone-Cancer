@@ -1,28 +1,17 @@
-# src/bone_cancer_ai/models/hosp_bonenet
+# HOSP-BoneNet
 
-## Purpose
-Single approved hierarchical spatial model.
+Purpose: Configurable hierarchical, spatially grounded radiograph model.
 
-## Files
-model.py: model scaffold; encoder.py: encoder scaffold; localization_head.py: localization head scaffold; pooling.py: pooling scaffold; concept_head.py: concept head scaffold; fusion.py: fusion scaffold; hierarchy.py: hierarchy scaffold; output.py: output scaffold.
+Files:
+- `encoder.py` — timm multistage features.
+- `localization_head.py`, `pooling.py`, `fusion.py` — lesion map and global/local fusion.
+- `concept_head.py`, `hierarchy.py` — gated optional predictions.
+- `model.py`, `output.py` — validated assembly and typed output mapping.
 
-## Inputs
-image tensors and verified enabled tasks.
+Main libraries: PyTorch and timm.
 
-## Outputs
-Pending Phase 6: binary logits and supported optional outputs.
+Flow: image → ConvNeXt features → global/local fusion → configured heads.
 
-## Main Libraries
-None used by current docstring-only modules.
+Run: `python scripts/phase6_smoke_overfit.py`
 
-## Important Functions / Classes
-Implementation and interfaces are Pending Phase 6; __init__.py is a package marker.
-
-## Theory
-Global/local fusion combines anatomy context with candidate-lesion features.
-
-## Execution
-Pending Phase 6; see root guide.
-
-## Notes
-Do not edit generated records manually. Keep original dataset files untouched. Future-phase scaffolds are not completed functionality; update this README when implementation becomes active.
+Only binary supervision is currently verified; optional heads require schema gates.
