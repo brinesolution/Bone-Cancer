@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import shutil
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -266,6 +267,11 @@ class _FakeTrainer:
         self.model = model
         self.directory = Path(kwargs["checkpoint_dir"])
         self.config = kwargs["resolved_config"]
+        resume_from = kwargs.get("resume_from")
+        if resume_from is not None:
+            payload = torch.load(resume_from, weights_only=True)
+            self.model.weight.data.fill_(payload["weight"])
+            self.events.append(("resume", self.config["stage_key"], Path(resume_from).name))
         self.events.append(
             (
                 "trainer",
@@ -460,3 +466,31 @@ def test_production_git_guard_rejects_a_dirty_tree(monkeypatch: pytest.MonkeyPat
 
     with pytest.raises(RuntimeError, match="clean committed Git tree"):
         hosp_cli._require_clean_git(ROOT)
+
+
+def test_failed_run_resumes_stage_a_last_and_continues_missing_stage_d(
+    tmp_path: Path,
+) -> None:
+    config = _project_config(tmp_path)
+    run = hosp_cli.run_hosp_training(config, dependencies=_fake_dependencies([]))
+    shutil.rmtree(run / "stage_D")
+    for name in ("selection.json", "metrics.json", "best_checkpoint_path.txt"):
+        (run / name).unlink()
+    (run / "status.json").write_text(
+        json.dumps({"status": "failed", "test": "not_run", "planned_phase": 9}),
+        encoding="utf-8",
+    )
+    events: list[Any] = []
+
+    resumed = hosp_cli.run_hosp_training(
+        config,
+        dependencies=_fake_dependencies(events),
+        resume_run=run,
+    )
+
+    assert resumed == run
+    assert ("resume", "A", "last.pt") in events
+    assert not any(event[:2] == ("resume", "D") for event in events if isinstance(event, tuple))
+    assert json.loads((run / "status.json").read_text())["status"] == "complete"
+    assert (run / "resume_provenance.txt").is_file()
+    assert hosp_cli.validate_run_bundle(run)["selected_stage"] == "D"

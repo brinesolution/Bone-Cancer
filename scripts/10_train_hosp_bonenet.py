@@ -476,6 +476,34 @@ def _new_run_directory(output_root: Path) -> Path:
     raise RuntimeError("could not allocate a unique HOSP run directory")
 
 
+def _resume_directory(
+    resume_run: Path, output_root: Path, record: Mapping[str, Any]
+) -> tuple[Path, str]:
+    run_dir = Path(resume_run).resolve()
+    if run_dir.parent != output_root.resolve() or not run_dir.is_dir():
+        raise ValueError("resume run must be an existing direct child of HOSP output_root")
+    status_path = run_dir / "status.json"
+    config_path = run_dir / "config.yaml"
+    if not status_path.is_file() or not config_path.is_file():
+        raise ValueError("resume run lacks status/config provenance")
+    status = json.loads(status_path.read_text(encoding="utf-8"))
+    prior_status = status.get("status") if isinstance(status, Mapping) else None
+    if prior_status not in {"failed", "running"}:
+        raise ValueError("only a failed or interrupted run can be resumed")
+    saved_record = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    if not _strict_equal(saved_record, record):
+        raise ValueError("resume run config does not match the current resolved config")
+    for stage_key in ("A", "D"):
+        stage_dir = run_dir / f"stage_{stage_key}"
+        if not stage_dir.exists():
+            continue
+        present = {path.name for path in stage_dir.iterdir() if path.is_file()}
+        checkpoints = {"best.pt", "last.pt"} & present
+        if checkpoints and checkpoints != {"best.pt", "last.pt"}:
+            raise ValueError(f"stage_{stage_key} has an incomplete checkpoint pair")
+    return run_dir, str(prior_status)
+
+
 def _write_environment(path: Path) -> None:
     import torch
 
@@ -648,6 +676,7 @@ def run_hosp_training(
     model_config_path: Path,
     *,
     dependencies: RunDependencies | None = None,
+    resume_run: Path | None = None,
 ) -> Path:
     """Execute approved stages and persist one unique validation-only bundle."""
 
@@ -658,21 +687,40 @@ def run_hosp_training(
     resolved = resolve_config(model_config_path)
     record, runtime = resolved["record"], resolved["runtime"]
     production_run = dependencies is None
-    if production_run:
+    orchestration_commit = (
         _require_clean_git(Path(runtime["project_root"]))
+        if production_run
+        else "dependency-injected-test"
+    )
     dependencies = dependencies or _default_dependencies()
     if not dependencies.cuda_available():
         raise RuntimeError("Phase 7 HOSP training requires CUDA")
     validate_recorded_inputs(record, runtime)
-    run_dir = _new_run_directory(Path(runtime["output_root"]))
+    output_root = Path(runtime["output_root"])
+    prior_status: str | None = None
+    if resume_run is None:
+        run_dir = _new_run_directory(output_root)
+    else:
+        run_dir, prior_status = _resume_directory(resume_run, output_root, record)
     notes_path = run_dir / "notes.md"
     try:
-        run_dir.joinpath("config.yaml").write_text(
-            yaml.safe_dump(record, sort_keys=False), encoding="utf-8", newline="\n"
-        )
-        _write_environment(run_dir / "environment.txt")
-        _write_git_state(run_dir / "git_commit.txt", Path(runtime["project_root"]))
-        _write_notes(notes_path, status="Running", detail="Run initialized.")
+        if resume_run is None:
+            run_dir.joinpath("config.yaml").write_text(
+                yaml.safe_dump(record, sort_keys=False), encoding="utf-8", newline="\n"
+            )
+            _write_environment(run_dir / "environment.txt")
+            _write_git_state(run_dir / "git_commit.txt", Path(runtime["project_root"]))
+            detail = "Run initialized."
+        else:
+            resume_path = run_dir / "resume_provenance.txt"
+            with resume_path.open("a", encoding="utf-8", newline="\n") as stream:
+                stream.write(
+                    f"resumed_at={datetime.now(UTC).isoformat()} "
+                    f"prior_status={prior_status} "
+                    f"orchestration_commit={orchestration_commit}\n"
+                )
+            detail = f"Resumed from prior status: {prior_status}."
+        _write_notes(notes_path, status="Running", detail=detail)
         atomic_write_json(
             {"status": "running", "test": "not_run", "planned_phase": 9},
             run_dir / "status.json",
@@ -701,7 +749,7 @@ def run_hosp_training(
         stage_checkpoints: dict[str, dict[str, Any]] = {}
         for stage_key in ("A", "D"):
             stage_dir = run_dir / f"stage_{stage_key}"
-            stage_dir.mkdir()
+            stage_dir.mkdir(exist_ok=True)
             stage_config = _stage_config(record, stage_key)
             model = dependencies.create_model(record["model"], runtime["schema"])
             if stage_key == "A":
@@ -728,14 +776,20 @@ def run_hosp_training(
                     expected_resolved_config=_stage_config(record, "A"),
                     expected_selection_metric="AUROC",
                 )
-            trainer = dependencies.trainer_type(
-                model,
-                model_alias="hosp_bonenet",
-                resolved_config=stage_config,
-                checkpoint_dir=stage_dir,
-                pos_weight=pos_weight,
-                device=record["device"],
-            )
+            trainer_kwargs = {
+                "model_alias": "hosp_bonenet",
+                "resolved_config": stage_config,
+                "checkpoint_dir": stage_dir,
+                "pos_weight": pos_weight,
+                "device": record["device"],
+            }
+            if (stage_dir / "best.pt").is_file() and (stage_dir / "last.pt").is_file():
+                trainer_kwargs["resume_from"] = stage_dir / "last.pt"
+                print(
+                    f"phase7_resume stage={stage_key} checkpoint=stage_{stage_key}/last.pt",
+                    flush=True,
+                )
+            trainer = dependencies.trainer_type(model, **trainer_kwargs)
             result = trainer.fit(fit_loader, val_loader)
             history = [dict(row) for row in result["history"]]
             dependencies.load_checkpoint(
@@ -1083,13 +1137,17 @@ def main(argv: list[str] | None = None) -> int:
         "--config", type=Path, default=PROJECT_ROOT / "configs" / "hosp_bonenet.yaml"
     )
     parser.add_argument("--validate-bundle", type=Path)
+    parser.add_argument("--resume-run", type=Path)
     args = parser.parse_args(argv)
     if args.validate_bundle is not None:
-        if args.config != PROJECT_ROOT / "configs" / "hosp_bonenet.yaml":
-            parser.error("--validate-bundle cannot be combined with --config")
+        if (
+            args.config != PROJECT_ROOT / "configs" / "hosp_bonenet.yaml"
+            or args.resume_run is not None
+        ):
+            parser.error("--validate-bundle cannot be combined with other run options")
         print(json.dumps(validate_run_bundle(args.validate_bundle), indent=2))
         return 0
-    print(run_hosp_training(args.config))
+    print(run_hosp_training(args.config, resume_run=args.resume_run))
     return 0
 
 
