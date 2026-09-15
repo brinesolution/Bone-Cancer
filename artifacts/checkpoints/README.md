@@ -1,28 +1,28 @@
 # artifacts/checkpoints
 
 ## Purpose
-Model weights.
+Promoted model weights and their verified alias registry.
 
 ## Files
-README.md: folder contract; no produced files yet.
+README.md: folder contract; registry.json: tracked metadata only; `*.pt`: local immutable weights.
 
 ## Inputs
-Verified inputs from the owning phase.
+Selected `best.pt` checkpoints from verified runs.
 
 ## Outputs
-No outputs yet.
+`registry.json` maps stable aliases to project-relative checkpoints and their SHA-256 digests.
 
 ## Main Libraries
-None in Phase 1.
+Python standard library (`hashlib`, `json`, `os`, `shutil`).
 
 ## Important Functions / Classes
-No functions in this output folder; parent README identifies producers.
+`bone_cancer_ai.artifacts.registry.promote_checkpoint` and `resolve_checkpoint` own promotion.
 
 ## Theory
-Not run; never overwrite another run or commit large checkpoints.
+Promotion hard-links when possible, falls back to an atomic copy, and refuses invalid or changed files.
 
 ## Execution
-Pending owning phase; see parent README.
+Later training phases register selected checkpoints through the shared API.
 
 ## Notes
-Do not edit generated records manually. Keep original dataset files untouched. Future-phase scaffolds are not completed functionality; update this README when implementation becomes active.
+Do not edit `registry.json` or generated weights manually. Git tracks registry metadata, never large checkpoints.
