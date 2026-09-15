@@ -500,7 +500,7 @@ def _resume_directory(
             continue
         present = {path.name for path in stage_dir.iterdir() if path.is_file()}
         checkpoints = {"best.pt", "last.pt"} & present
-        if checkpoints and checkpoints != {"best.pt", "last.pt"}:
+        if checkpoints == {"best.pt"}:
             raise ValueError(f"stage_{stage_key} has an incomplete checkpoint pair")
     return run_dir, str(prior_status)
 
@@ -532,6 +532,7 @@ def _discover_exact_run(
         return None
     completed: list[Path] = []
     failed: list[Path] = []
+    running: list[Path] = []
     for run_dir in sorted(
         (path for path in output_root.iterdir() if path.is_dir()),
         key=lambda path: path.name,
@@ -545,12 +546,16 @@ def _discover_exact_run(
             for stage_key in ("A", "D")
         ):
             failed.append(run_dir)
-        elif status in {None, "running"}:
+        elif status == "running":
+            running.append(run_dir)
+        elif status is None:
             continue
         elif status is not None:
             raise ValueError(f"run {run_dir.name} has unsupported status {status!r}")
     if completed:
         return "complete", completed[0]
+    if running:
+        return "running", running[0]
     if failed:
         return "failed", failed[0]
     return None
@@ -774,10 +779,6 @@ def run_hosp_training(
 ) -> Path:
     """Execute approved stages and persist one unique validation-only bundle."""
 
-    import pandas as pd
-
-    from bone_cancer_ai.evaluation.reports import atomic_write_csv, atomic_write_json
-
     if force_new_run and resume_run is not None:
         raise ValueError("force_new_run cannot be combined with resume_run")
     resolved = resolve_config(model_config_path)
@@ -800,6 +801,10 @@ def run_hosp_training(
                 )
                 print(f"phase7_reuse run_id={discovered_run.name}", flush=True)
                 return discovered_run
+            if discovered_status == "running":
+                raise RuntimeError(
+                    f"exact HOSP run {discovered_run.name} is already running"
+                )
             selected_resume = discovered_run
     production_run = dependencies is None
     orchestration_commit = (
@@ -811,6 +816,50 @@ def run_hosp_training(
     if not dependencies.cuda_available():
         raise RuntimeError("Phase 7 HOSP training requires CUDA")
     validate_recorded_inputs(record, runtime)
+    if selected_resume is not None:
+        from bone_cancer_ai.utils.locking import exclusive_file_lock
+
+        resume_candidate = Path(selected_resume).resolve()
+        if resume_candidate.parent != output_root.resolve() or not resume_candidate.is_dir():
+            raise ValueError("resume run must be an existing direct child of HOSP output_root")
+        with exclusive_file_lock(resume_candidate / ".run.lock"):
+            return _execute_hosp_training(
+                record=record,
+                runtime=runtime,
+                project_root=project_root,
+                output_root=output_root,
+                dependencies=dependencies,
+                selected_resume=resume_candidate,
+                orchestration_commit=orchestration_commit,
+                force_new_run=force_new_run,
+            )
+    return _execute_hosp_training(
+        record=record,
+        runtime=runtime,
+        project_root=project_root,
+        output_root=output_root,
+        dependencies=dependencies,
+        selected_resume=None,
+        orchestration_commit=orchestration_commit,
+        force_new_run=force_new_run,
+    )
+
+
+def _execute_hosp_training(
+    *,
+    record: Mapping[str, Any],
+    runtime: Mapping[str, Any],
+    project_root: Path,
+    output_root: Path,
+    dependencies: RunDependencies,
+    selected_resume: Path | None,
+    orchestration_commit: str,
+    force_new_run: bool,
+) -> Path:
+    import pandas as pd
+
+    from bone_cancer_ai.evaluation.reports import atomic_write_csv, atomic_write_json
+
     prior_status: str | None = None
     if selected_resume is None:
         run_dir = _new_run_directory(output_root)
@@ -897,7 +946,7 @@ def run_hosp_training(
                 "pos_weight": pos_weight,
                 "device": record["device"],
             }
-            if (stage_dir / "best.pt").is_file() and (stage_dir / "last.pt").is_file():
+            if (stage_dir / "last.pt").is_file():
                 trainer_kwargs["resume_from"] = stage_dir / "last.pt"
                 print(
                     f"phase7_resume stage={stage_key} checkpoint=stage_{stage_key}/last.pt",

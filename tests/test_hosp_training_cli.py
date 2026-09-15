@@ -4,6 +4,7 @@ import importlib.util
 import json
 import shutil
 import subprocess
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -601,7 +602,7 @@ def test_discovery_requires_strict_persisted_config_equality(tmp_path: Path) -> 
     assert hosp_cli._matching_run_status(run, record) is None
 
 
-def test_discovery_never_automatically_resumes_a_running_run(tmp_path: Path) -> None:
+def test_exact_running_run_blocks_automatic_resume_and_new_allocation(tmp_path: Path) -> None:
     config = _project_config(tmp_path)
     resolved = hosp_cli.resolve_config(config)
     record = resolved["record"]
@@ -614,7 +615,10 @@ def test_discovery_never_automatically_resumes_a_running_run(tmp_path: Path) -> 
     (run / "status.json").write_text(json.dumps({"status": "running"}), encoding="utf-8")
     (run / "stage_A" / "last.pt").write_bytes(b"active checkpoint")
 
-    assert hosp_cli._discover_exact_run(output_root, record) is None
+    with pytest.raises(RuntimeError, match="already running"):
+        hosp_cli.run_hosp_training(config, dependencies=_fake_dependencies([]))
+
+    assert [path.name for path in output_root.iterdir() if path.is_dir()] == ["candidate"]
 
 
 def test_cli_rejects_force_new_run_with_explicit_resume(
@@ -625,3 +629,100 @@ def test_cli_rejects_force_new_run_with_explicit_resume(
 
     assert error.value.code == 2
     assert "--force-new-run cannot be combined with --resume-run" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("explicit_resume", [False, True])
+def test_resume_lock_contention_fails_without_mutating_run_artifacts(
+    tmp_path: Path, explicit_resume: bool
+) -> None:
+    from bone_cancer_ai.utils.locking import exclusive_file_lock
+
+    config = _project_config(tmp_path)
+    run = hosp_cli.run_hosp_training(config, dependencies=_fake_dependencies([]))
+    shutil.rmtree(run / "stage_D")
+    for name in ("selection.json", "metrics.json", "best_checkpoint_path.txt"):
+        (run / name).unlink()
+    (run / "status.json").write_text(
+        json.dumps({"status": "failed", "test": "not_run", "planned_phase": 9}),
+        encoding="utf-8",
+    )
+    acquired = threading.Event()
+    release = threading.Event()
+    holder_errors: list[BaseException] = []
+
+    def hold_run_lock() -> None:
+        try:
+            with exclusive_file_lock(run / ".run.lock"):
+                acquired.set()
+                if not release.wait(timeout=5):
+                    raise TimeoutError("test did not release the run lock")
+        except BaseException as error:
+            holder_errors.append(error)
+
+    holder = threading.Thread(target=hold_run_lock)
+    holder.start()
+    assert acquired.wait(timeout=5)
+    before = {
+        path.relative_to(run).as_posix(): path.read_bytes()
+        for path in run.rglob("*")
+        if path.is_file() and path.name != ".run.lock"
+    }
+    try:
+        with pytest.raises(TimeoutError, match="already locked"):
+            hosp_cli.run_hosp_training(
+                config,
+                dependencies=_fake_dependencies([]),
+                resume_run=run if explicit_resume else None,
+            )
+    finally:
+        release.set()
+        holder.join(timeout=5)
+
+    after = {
+        path.relative_to(run).as_posix(): path.read_bytes()
+        for path in run.rglob("*")
+        if path.is_file() and path.name != ".run.lock"
+    }
+    assert not holder.is_alive()
+    assert holder_errors == []
+    assert after == before
+
+
+def test_failed_run_with_last_only_checkpoint_is_automatically_recoverable(
+    tmp_path: Path,
+) -> None:
+    config = _project_config(tmp_path)
+    run = hosp_cli.run_hosp_training(config, dependencies=_fake_dependencies([]))
+    shutil.rmtree(run / "stage_D")
+    (run / "stage_A" / "best.pt").unlink()
+    for name in ("selection.json", "metrics.json", "best_checkpoint_path.txt"):
+        (run / name).unlink()
+    (run / "status.json").write_text(
+        json.dumps({"status": "failed", "test": "not_run", "planned_phase": 9}),
+        encoding="utf-8",
+    )
+    events: list[Any] = []
+
+    resumed = hosp_cli.run_hosp_training(config, dependencies=_fake_dependencies(events))
+
+    assert resumed == run
+    assert ("resume", "A", "last.pt") in events
+    assert (run / "stage_A" / "best.pt").is_file()
+    assert hosp_cli.validate_run_bundle(run)["selected_stage"] == "D"
+
+
+def test_resume_still_rejects_best_without_last(tmp_path: Path) -> None:
+    config = _project_config(tmp_path)
+    run = hosp_cli.run_hosp_training(config, dependencies=_fake_dependencies([]))
+    (run / "stage_A" / "last.pt").unlink()
+    (run / "status.json").write_text(
+        json.dumps({"status": "failed", "test": "not_run", "planned_phase": 9}),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="incomplete checkpoint pair"):
+        hosp_cli.run_hosp_training(
+            config,
+            dependencies=_fake_dependencies([]),
+            resume_run=run,
+        )

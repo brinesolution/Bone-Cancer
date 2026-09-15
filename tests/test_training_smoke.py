@@ -772,6 +772,51 @@ def test_resume_restores_history_scheduler_optimizer_and_early_stopping(tmp_path
     assert torch.equal(resumed.model.weight.detach(), uninterrupted.model.weight.detach())
 
 
+def test_resume_reconstructs_missing_best_when_last_is_the_best_epoch(tmp_path: Path) -> None:
+    run_dir = tmp_path / "recoverable-last-only"
+    interrupted = _trainer(run_dir, epochs=2, patience=8)
+    with pytest.raises(RuntimeError, match="synthetic interruption"):
+        interrupted.fit(InterruptAfter(_train_batches(), complete_epochs=1), _val_batches())
+    last_bytes = (run_dir / "last.pt").read_bytes()
+    (run_dir / "best.pt").unlink()
+
+    resumed = BinaryTrainer(
+        TinyBinaryModel(-9.0),
+        model_alias="densenet121",
+        resolved_config=_config(epochs=2, patience=8),
+        checkpoint_dir=run_dir,
+        pos_weight=1.0,
+        device="cpu",
+        resume_from=run_dir / "last.pt",
+    )
+
+    assert (run_dir / "best.pt").read_bytes() == last_bytes
+    assert resumed.start_epoch == 2
+    assert resumed.fit(_train_batches(), _val_batches())["best_epoch"] == 1
+
+
+def test_resume_rejects_last_only_when_historical_best_cannot_be_reconstructed(
+    tmp_path: Path,
+) -> None:
+    run_dir = tmp_path / "unrecoverable-last-only"
+    completed = _trainer(run_dir, epochs=3, patience=8)
+    result = completed.fit(_train_batches(), _val_batches())
+    assert result["best_epoch"] == 1
+    assert torch.load(run_dir / "last.pt", weights_only=True)["epoch"] == 3
+    (run_dir / "best.pt").unlink()
+
+    with pytest.raises(ValueError, match="historical best checkpoint is missing"):
+        BinaryTrainer(
+            TinyBinaryModel(-9.0),
+            model_alias="densenet121",
+            resolved_config=_config(epochs=3, patience=8),
+            checkpoint_dir=run_dir,
+            pos_weight=1.0,
+            device="cpu",
+            resume_from=run_dir / "last.pt",
+        )
+
+
 def test_resume_from_terminal_early_stopping_checkpoint_does_not_read_loaders(
     tmp_path: Path,
 ) -> None:

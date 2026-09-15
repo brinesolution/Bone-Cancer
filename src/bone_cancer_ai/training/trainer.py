@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import random
+import shutil
 import time
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import numpy as np
 import torch
@@ -25,6 +28,15 @@ from bone_cancer_ai.training.scheduler import build_scheduler
 
 def _format_metric(value: object) -> str:
     return "undefined" if value is None else f"{float(value):.6f}"
+
+
+def _atomic_copy_checkpoint(source: Path, destination: Path) -> None:
+    temporary = destination.with_name(f".{destination.name}.{uuid4().hex}.tmp")
+    try:
+        shutil.copyfile(source, temporary)
+        os.replace(temporary, destination)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 class BinaryTrainer:
@@ -102,9 +114,9 @@ class BinaryTrainer:
             resume_path = Path(resume_from)
             existing_best = resume_path.parent / "best.pt"
             existing_last = resume_path.parent / "last.pt"
-            if not existing_best.is_file() or not existing_last.is_file():
+            if not existing_last.is_file():
                 raise FileNotFoundError(
-                    "resume checkpoint directory must contain existing best.pt and last.pt"
+                    "resume checkpoint directory must contain existing last.pt"
                 )
             self.best_checkpoint_path = existing_best
             self.last_checkpoint_path = existing_last
@@ -120,6 +132,12 @@ class BinaryTrainer:
                 expected_resolved_config=self.resolved_config,
                 expected_selection_metric=self.selection_metric,
             )
+            if not existing_best.is_file():
+                if metadata["early_stopping_state"]["best_epoch"] != metadata["epoch"]:
+                    raise ValueError(
+                        "historical best checkpoint is missing and cannot be reconstructed"
+                    )
+                _atomic_copy_checkpoint(resume_path, existing_best)
             self.history = [dict(record) for record in metadata["history"]]
             self.start_epoch = int(metadata["epoch"]) + 1
 
