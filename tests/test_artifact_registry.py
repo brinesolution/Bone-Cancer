@@ -372,3 +372,53 @@ def test_failed_alias_replacement_leaves_the_previous_alias_resolvable(
         )
 
     assert resolve_checkpoint(project_root, "hosp_bonenet.phase7.selected") == original
+
+
+def test_alias_replacement_requires_a_selected_alias(tmp_path: Path) -> None:
+    project_root = tmp_path / "project"
+    first = _checkpoint(project_root, b"first checkpoint")
+    second = _second_checkpoint(project_root, b"second checkpoint")
+    promote_checkpoint(
+        project_root,
+        alias="hosp_bonenet.phase7.candidate",
+        checkpoint_path=first,
+        **_promotion_details(),
+    )
+
+    with pytest.raises(ValueError, match=r"only permitted for .*\.selected"):
+        promote_checkpoint(
+            project_root,
+            alias="hosp_bonenet.phase7.candidate",
+            checkpoint_path=second,
+            replace_alias=True,
+            **_promotion_details(source_run="experiments/hosp_bonenet/run-002"),
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("model_family", "baseline"), ("phase", "phase_8")],
+)
+def test_alias_replacement_requires_the_existing_model_family_and_phase(
+    tmp_path: Path, field: str, value: str
+) -> None:
+    project_root = tmp_path / "project"
+    first = _checkpoint(project_root, b"first checkpoint")
+    second = _second_checkpoint(project_root, b"second checkpoint")
+    promote_checkpoint(
+        project_root,
+        alias="hosp_bonenet.phase7.selected",
+        checkpoint_path=first,
+        **_promotion_details(),
+    )
+    replacement_details = _promotion_details(source_run="experiments/hosp_bonenet/run-002")
+    replacement_details[field] = value
+
+    with pytest.raises(ValueError, match="model_family and phase"):
+        promote_checkpoint(
+            project_root,
+            alias="hosp_bonenet.phase7.selected",
+            checkpoint_path=second,
+            replace_alias=True,
+            **replacement_details,
+        )

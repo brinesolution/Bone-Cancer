@@ -85,7 +85,7 @@ def promote_checkpoint(
     configuration_fingerprint: str,
     test_status: Mapping[str, Any],
 ) -> CheckpointRecord:
-    """Promote a checkpoint; replace a different alias target only when explicitly requested."""
+    """Promote a checkpoint; replace a matching selected alias only when explicitly requested."""
     root = Path(project_root).resolve()
     if type(replace_alias) is not bool:
         raise ValueError("replace_alias must be a boolean")
@@ -126,6 +126,17 @@ def promote_checkpoint(
             if not replace_alias:
                 raise ValueError(
                     f"checkpoint alias {alias!r} already identifies a different artifact"
+                )
+            if not alias.endswith(".selected"):
+                raise ValueError(
+                    "alias replacement is only permitted for aliases ending in .selected"
+                )
+            if (
+                existing_record.model_family != record.model_family
+                or existing_record.phase != record.phase
+            ):
+                raise ValueError(
+                    "alias replacement requires the existing model_family and phase to match"
                 )
 
         destination = record.absolute_checkpoint_path(root)
