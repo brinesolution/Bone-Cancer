@@ -108,6 +108,7 @@ ROOT_REQUIRED_FILES = {
     "metrics.json",
     "best_checkpoint_path.txt",
 }
+SELECTED_CHECKPOINT_ALIAS = "hosp_bonenet.phase7.selected"
 
 
 class RunDependencies:
@@ -504,6 +505,98 @@ def _resume_directory(
     return run_dir, str(prior_status)
 
 
+def _matching_run_status(run_dir: Path, record: Mapping[str, Any]) -> str | None:
+    config_path = run_dir / "config.yaml"
+    status_path = run_dir / "status.json"
+    if not config_path.is_file() or not status_path.is_file():
+        return None
+    try:
+        saved_record = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    except yaml.YAMLError as error:
+        raise ValueError(f"run {run_dir.name} has malformed config provenance") from error
+    if not _strict_equal(saved_record, record):
+        return None
+    try:
+        status = json.loads(status_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as error:
+        raise ValueError(f"run {run_dir.name} has malformed status provenance") from error
+    if not isinstance(status, Mapping) or not isinstance(status.get("status"), str):
+        raise ValueError(f"run {run_dir.name} has malformed status provenance")
+    return str(status["status"])
+
+
+def _discover_exact_run(
+    output_root: Path, record: Mapping[str, Any]
+) -> tuple[str, Path] | None:
+    if not output_root.is_dir():
+        return None
+    completed: list[Path] = []
+    failed: list[Path] = []
+    for run_dir in sorted(
+        (path for path in output_root.iterdir() if path.is_dir()),
+        key=lambda path: path.name,
+        reverse=True,
+    ):
+        status = _matching_run_status(run_dir, record)
+        if status == "complete":
+            completed.append(run_dir)
+        elif status == "failed" and any(
+            (run_dir / f"stage_{stage_key}" / "last.pt").is_file()
+            for stage_key in ("A", "D")
+        ):
+            failed.append(run_dir)
+        elif status in {None, "running"}:
+            continue
+        elif status is not None:
+            raise ValueError(f"run {run_dir.name} has unsupported status {status!r}")
+    if completed:
+        return "complete", completed[0]
+    if failed:
+        return "failed", failed[0]
+    return None
+
+
+def _configuration_fingerprint(record: Mapping[str, Any]) -> str:
+    serialized = json.dumps(
+        record,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    ).encode("utf-8")
+    return hashlib.sha256(serialized).hexdigest()
+
+
+def _register_selected_checkpoint(
+    run_dir: Path,
+    record: Mapping[str, Any],
+    selection: Mapping[str, Any],
+    *,
+    project_root: Path,
+    replace_alias: bool,
+) -> None:
+    from bone_cancer_ai.artifacts.registry import promote_checkpoint
+
+    selected_checkpoint = run_dir / str(selection["selected_checkpoint"])
+    selected_stage = str(selection["selected_stage"])
+    promote_checkpoint(
+        project_root,
+        alias=SELECTED_CHECKPOINT_ALIAS,
+        checkpoint_path=selected_checkpoint,
+        replace_alias=replace_alias,
+        model_family="hosp_bonenet",
+        phase="phase_7",
+        source_run=run_dir,
+        selected_metric={
+            "split": "val",
+            "name": "AUROC",
+            "value": float(selection["stage_scores"][selected_stage]),
+        },
+        configuration_fingerprint=_configuration_fingerprint(record),
+        test_status={"status": "not_run", "planned_phase": 9},
+    )
+
+
 def _write_environment(path: Path) -> None:
     import torch
 
@@ -677,6 +770,7 @@ def run_hosp_training(
     *,
     dependencies: RunDependencies | None = None,
     resume_run: Path | None = None,
+    force_new_run: bool = False,
 ) -> Path:
     """Execute approved stages and persist one unique validation-only bundle."""
 
@@ -684,11 +778,32 @@ def run_hosp_training(
 
     from bone_cancer_ai.evaluation.reports import atomic_write_csv, atomic_write_json
 
+    if force_new_run and resume_run is not None:
+        raise ValueError("force_new_run cannot be combined with resume_run")
     resolved = resolve_config(model_config_path)
     record, runtime = resolved["record"], resolved["runtime"]
+    project_root = Path(runtime["project_root"])
+    output_root = Path(runtime["output_root"])
+    selected_resume = resume_run
+    if resume_run is None and not force_new_run:
+        discovered = _discover_exact_run(output_root, record)
+        if discovered is not None:
+            discovered_status, discovered_run = discovered
+            if discovered_status == "complete":
+                selection = validate_run_bundle(discovered_run)
+                _register_selected_checkpoint(
+                    discovered_run,
+                    record,
+                    selection,
+                    project_root=project_root,
+                    replace_alias=False,
+                )
+                print(f"phase7_reuse run_id={discovered_run.name}", flush=True)
+                return discovered_run
+            selected_resume = discovered_run
     production_run = dependencies is None
     orchestration_commit = (
-        _require_clean_git(Path(runtime["project_root"]))
+        _require_clean_git(project_root)
         if production_run
         else "dependency-injected-test"
     )
@@ -696,15 +811,14 @@ def run_hosp_training(
     if not dependencies.cuda_available():
         raise RuntimeError("Phase 7 HOSP training requires CUDA")
     validate_recorded_inputs(record, runtime)
-    output_root = Path(runtime["output_root"])
     prior_status: str | None = None
-    if resume_run is None:
+    if selected_resume is None:
         run_dir = _new_run_directory(output_root)
     else:
-        run_dir, prior_status = _resume_directory(resume_run, output_root, record)
+        run_dir, prior_status = _resume_directory(selected_resume, output_root, record)
     notes_path = run_dir / "notes.md"
     try:
-        if resume_run is None:
+        if selected_resume is None:
             run_dir.joinpath("config.yaml").write_text(
                 yaml.safe_dump(record, sort_keys=False), encoding="utf-8", newline="\n"
             )
@@ -877,15 +991,7 @@ def run_hosp_training(
             {"status": "complete", "test": "not_run", "planned_phase": 9},
             run_dir / "status.json",
         )
-        validate_run_bundle(run_dir)
-        print(
-            "phase7_selection "
-            f"stage={selected_stage} epoch={selection['selected_epoch']} "
-            f"val_AUROC={selection['stage_scores'][selected_stage]:.6f} "
-            f"checkpoint={checkpoint_relative}",
-            flush=True,
-        )
-        return run_dir
+        validated_selection = validate_run_bundle(run_dir)
     except Exception as error:
         _write_notes(
             notes_path,
@@ -902,6 +1008,21 @@ def run_hosp_training(
             run_dir / "status.json",
         )
         raise
+    _register_selected_checkpoint(
+        run_dir,
+        record,
+        validated_selection,
+        project_root=project_root,
+        replace_alias=force_new_run,
+    )
+    print(
+        "phase7_selection "
+        f"stage={selected_stage} epoch={selection['selected_epoch']} "
+        f"val_AUROC={selection['stage_scores'][selected_stage]:.6f} "
+        f"checkpoint={checkpoint_relative}",
+        flush=True,
+    )
+    return run_dir
 
 
 def validate_run_bundle(run_dir: Path) -> dict[str, Any]:
@@ -1138,16 +1259,26 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--validate-bundle", type=Path)
     parser.add_argument("--resume-run", type=Path)
+    parser.add_argument("--force-new-run", action="store_true")
     args = parser.parse_args(argv)
     if args.validate_bundle is not None:
         if (
             args.config != PROJECT_ROOT / "configs" / "hosp_bonenet.yaml"
             or args.resume_run is not None
+            or args.force_new_run
         ):
             parser.error("--validate-bundle cannot be combined with other run options")
         print(json.dumps(validate_run_bundle(args.validate_bundle), indent=2))
         return 0
-    print(run_hosp_training(args.config, resume_run=args.resume_run))
+    if args.force_new_run and args.resume_run is not None:
+        parser.error("--force-new-run cannot be combined with --resume-run")
+    print(
+        run_hosp_training(
+            args.config,
+            resume_run=args.resume_run,
+            force_new_run=args.force_new_run,
+        )
+    )
     return 0
 
 

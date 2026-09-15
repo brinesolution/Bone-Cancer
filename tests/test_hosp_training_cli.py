@@ -494,3 +494,134 @@ def test_failed_run_resumes_stage_a_last_and_continues_missing_stage_d(
     assert json.loads((run / "status.json").read_text())["status"] == "complete"
     assert (run / "resume_provenance.txt").is_file()
     assert hosp_cli.validate_run_bundle(run)["selected_stage"] == "D"
+
+
+def test_exact_completed_run_is_validated_registered_and_reused_without_clean_git(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from bone_cancer_ai.artifacts.registry import resolve_checkpoint
+
+    config = _project_config(tmp_path)
+    project_root = config.parents[1]
+    run = hosp_cli.run_hosp_training(config, dependencies=_fake_dependencies([]))
+    registry_path = project_root / "artifacts" / "checkpoints" / "registry.json"
+    registry_before = registry_path.read_bytes()
+
+    def reject_git_check(project_root: Path) -> str:
+        del project_root
+        raise AssertionError("completed-run reuse must not inspect Git cleanliness")
+
+    monkeypatch.setattr(hosp_cli, "_require_clean_git", reject_git_check)
+    reused = hosp_cli.run_hosp_training(config)
+
+    assert reused == run
+    assert registry_path.read_bytes() == registry_before
+    record = resolve_checkpoint(project_root, "hosp_bonenet.phase7.selected")
+    assert record.source_run == run.relative_to(project_root).as_posix()
+    assert record.selected_metric == {"split": "val", "name": "AUROC", "value": 1.0}
+
+
+def test_exact_completed_run_must_pass_bundle_validation_before_reuse(tmp_path: Path) -> None:
+    config = _project_config(tmp_path)
+    run = hosp_cli.run_hosp_training(config, dependencies=_fake_dependencies([]))
+    with (run / "stage_D" / "best.pt").open("ab") as checkpoint:
+        checkpoint.write(b"tampered")
+
+    with pytest.raises(ValueError, match="checksum"):
+        hosp_cli.run_hosp_training(config, dependencies=_fake_dependencies([]))
+
+
+def test_exact_failed_run_is_automatically_resumed_before_allocating_a_new_run(
+    tmp_path: Path,
+) -> None:
+    config = _project_config(tmp_path)
+    run = hosp_cli.run_hosp_training(config, dependencies=_fake_dependencies([]))
+    shutil.rmtree(run / "stage_D")
+    for name in ("selection.json", "metrics.json", "best_checkpoint_path.txt"):
+        (run / name).unlink()
+    (run / "status.json").write_text(
+        json.dumps({"status": "failed", "test": "not_run", "planned_phase": 9}),
+        encoding="utf-8",
+    )
+    events: list[Any] = []
+
+    resumed = hosp_cli.run_hosp_training(config, dependencies=_fake_dependencies(events))
+
+    assert resumed == run
+    assert ("resume", "A", "last.pt") in events
+    assert (run / "resume_provenance.txt").is_file()
+    assert json.loads((run / "status.json").read_text())["status"] == "complete"
+
+
+def test_force_new_run_retrains_and_replaces_the_selected_alias(tmp_path: Path) -> None:
+    from bone_cancer_ai.artifacts.registry import resolve_checkpoint
+
+    config = _project_config(tmp_path)
+    project_root = config.parents[1]
+    first = hosp_cli.run_hosp_training(config, dependencies=_fake_dependencies([]))
+
+    second = hosp_cli.run_hosp_training(
+        config,
+        dependencies=_fake_dependencies([]),
+        force_new_run=True,
+    )
+
+    assert second != first
+    assert first.is_dir() and second.is_dir()
+    selected = resolve_checkpoint(project_root, "hosp_bonenet.phase7.selected")
+    assert selected.source_run == second.relative_to(project_root).as_posix()
+
+
+def test_force_new_run_conflicts_with_explicit_resume(tmp_path: Path) -> None:
+    config = _project_config(tmp_path)
+    run = hosp_cli.run_hosp_training(config, dependencies=_fake_dependencies([]))
+
+    with pytest.raises(ValueError, match="force_new_run.*resume_run"):
+        hosp_cli.run_hosp_training(
+            config,
+            dependencies=_fake_dependencies([]),
+            resume_run=run,
+            force_new_run=True,
+        )
+
+
+def test_discovery_requires_strict_persisted_config_equality(tmp_path: Path) -> None:
+    config = _project_config(tmp_path)
+    resolved = hosp_cli.resolve_config(config)
+    record = resolved["record"]
+    run = Path(resolved["runtime"]["output_root"]) / "candidate"
+    run.mkdir(parents=True)
+    saved_record = dict(record)
+    saved_record["seed"] = 42.0
+    (run / "config.yaml").write_text(
+        yaml.safe_dump(saved_record, sort_keys=False), encoding="utf-8"
+    )
+    (run / "status.json").write_text(json.dumps({"status": "complete"}), encoding="utf-8")
+
+    assert hosp_cli._matching_run_status(run, record) is None
+
+
+def test_discovery_never_automatically_resumes_a_running_run(tmp_path: Path) -> None:
+    config = _project_config(tmp_path)
+    resolved = hosp_cli.resolve_config(config)
+    record = resolved["record"]
+    output_root = Path(resolved["runtime"]["output_root"])
+    run = output_root / "candidate"
+    (run / "stage_A").mkdir(parents=True)
+    (run / "config.yaml").write_text(
+        yaml.safe_dump(record, sort_keys=False), encoding="utf-8"
+    )
+    (run / "status.json").write_text(json.dumps({"status": "running"}), encoding="utf-8")
+    (run / "stage_A" / "last.pt").write_bytes(b"active checkpoint")
+
+    assert hosp_cli._discover_exact_run(output_root, record) is None
+
+
+def test_cli_rejects_force_new_run_with_explicit_resume(
+    capsys: pytest.CaptureFixture[str], tmp_path: Path
+) -> None:
+    with pytest.raises(SystemExit) as error:
+        hosp_cli.main(["--resume-run", str(tmp_path), "--force-new-run"])
+
+    assert error.value.code == 2
+    assert "--force-new-run cannot be combined with --resume-run" in capsys.readouterr().err
