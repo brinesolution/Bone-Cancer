@@ -1,8 +1,8 @@
 # Project state
 
-Current phase: Phase 6 — HOSP-BoneNet Implementation COMPLETE
-Completed phases: 1–6
-Next phase: Phase 7 — Full HOSP-BoneNet Training
+Current phase: Phase 7 — Full Training and Checkpoint Selection COMPLETE
+Completed phases: 1–7
+Next phase: Phase 8 — Optimization and Accuracy Improvement
 
 ## Environment
 
@@ -16,72 +16,65 @@ Next phase: Phase 7 — Full HOSP-BoneNet Training
 
 - Immutable source: `dataset/Main`
 - Source images/labels: 12,557; class 0=`normal` 6,827, class 1=`bone_tumour` 5,730
-- Source snapshot: 12,560 files, 1,120,418,007 bytes; exactly matches Phase 5
+- Source snapshot: 12,560 files, 1,120,418,007 bytes; exact Phase 1 match after Phase 7
 - Derived splits: fit 4,871; calibration 857; validation 1,453; test 1,882
 - Split generation: `de64a489fff7202ec39d442e4b26a5a5c0d7e2c7db8ed7a8587601ef1cd28590`
-- Leakage: zero record/sample/group overlap; all four split files match Phase 5 hashes
+- Leakage: zero record/sample/group overlap; all split hashes preserved
 - Inputs: grayscale-replicated RGB, aspect-preserving 384×384 pad, ImageNet normalization
 
-## Annotation gates
+## Supervision gates
 
 - Verified training supervision: binary only
-- Valid source spatial records: 1,825; not released into preserved training manifests
+- Stages B/C skipped: spatial labels are not released; subtype/concept labels are unavailable
 - Human project reviews: 0; clinical verification: Unavailable
-- Subtype, risk, concept and supervised mask branches remain disabled
+- Optional subtype, risk, concept and supervised mask heads remain disabled
 
-## Phase 6 implementation
+## Phase 7 training
 
-- ConvNeXt-Tiny multistage encoder with discovered channel/reduction metadata
-- Input-aligned lightweight lesion FPN, global pooling and FP32 mask-weighted local pooling
-- Learned global/local fusion and configuration-gated concept/subtype/risk heads
-- Strict factory derives optional dimensions only from enabled label-schema sections
-- Masked binary/multiclass, Dice+BCE, concept, grounding and hierarchy losses
-- FP32 AMP reductions; valid labels cannot be silently dropped through missing outputs
-- Label-free inference returns only configuration-enabled tensor keys
-
-## Phase 6 smoke result
-
-- Split: fit_train only; 16 runtime-valid images, balanced 8/8
-- Backbone: ConvNeXt-Tiny; pretrained false; 96×96; CUDA AMP
-- Initial/final loss: 0.687840 / 0.104092; ratio 0.151331
-- Initial/final accuracy: 0.4375 / 1.0000; 10 epochs
-- Trainable parameters: 28,922,338; peak allocated CUDA memory: 648,881,152 bytes
-- This is an overfit acceptance check, not validation/test performance
+- Run: `experiments/hosp_bonenet/20260912T121852779982Z-a371f643`
+- Input: fit_train only; checkpoint selection: validation AUROC only; test: Not run
+- Stage A: 35 epochs, early stopped; best epoch 27; validation AUROC 0.956851
+- Stage D: 10 epochs at 1e-5; selected epoch 6; validation AUROC 0.958355
+- Selected validation AUPRC: 0.964236; F1: 0.902389; balanced accuracy: 0.901817
+- Selected confusion matrix: TN=649, FP=62, FN=81, TP=661
+- Selected checkpoint: `stage_D/best.pt`
+- SHA-256: `a6380739e6527a085434866c83a135b86ca118e82f8d5a8bf75d934d25ce268e`
+- Stage A/D best-checkpoint logits, targets and sample IDs reload exactly
+- Stage A resumed from intact epoch-29 state after a host-memory interruption; provenance is recorded
+- Training histories and curves exist for both executed stages; no unexplained NaNs
 
 ## Latest models
 
-- DenseNet121: test AUROC 0.96315; AUPRC 0.96519
-- EfficientNet-B3: test AUROC 0.97810; AUPRC 0.97612
-- ConvNeXt-Tiny: test AUROC 0.96401; AUPRC 0.96394
-- Swin-Tiny: test AUROC 0.96517; AUPRC 0.96355
-- HOSP-BoneNet checkpoint/validation/test metrics: Not run; Phase 7
+- DenseNet121 test AUROC/AUPRC: 0.96315 / 0.96519
+- EfficientNet-B3 test AUROC/AUPRC: 0.97810 / 0.97612
+- ConvNeXt-Tiny test AUROC/AUPRC: 0.96401 / 0.96394
+- Swin-Tiny test AUROC/AUPRC: 0.96517 / 0.96355
+- HOSP-BoneNet validation AUROC/AUPRC: 0.95835 / 0.96424; test: Not run
 
 ## Verification
 
-- `pytest -q`: 337 passed
+- `pytest -q`: 353 passed
 - Ruff, compileall, pip check, environment/CUDA check: PASS
-- Real 384×384 ConvNeXt HOSP forward/backward in CUDA AMP: PASS
-- Binary, subtype, mask and full multitask loss tests: PASS
-- Tiny overfit: PASS; implementation/config hashes recorded
-- Source/split preservation: PASS
-- Independent review: CLEAN; zero Critical/Important findings
+- Run-bundle validation and both-stage exact checkpoint reload: PASS
+- Source and split preservation: PASS
+- Independent Phase 7 review: CLEAN
 
 ## Important paths
 
-- Config: `configs/hosp_bonenet.yaml`
-- Architecture: `src/bone_cancer_ai/models/hosp_bonenet/`
-- Losses: `src/bone_cancer_ai/losses/`
-- Tests: `tests/test_hosp_bonenet.py`, `tests/test_hosp_losses.py`
-- Overfit: `scripts/phase6_smoke_overfit.py`
-- Evidence: `artifacts/verification/phase6_tiny_overfit.json`, `logs/phase6_verification.json`
+- Training config: `configs/hosp_train.yaml`
+- Model config: `configs/hosp_bonenet.yaml`
+- Trainer: `src/bone_cancer_ai/training/trainer.py`
+- Entry point: `scripts/10_train_hosp_bonenet.py`
+- Selected run: `experiments/hosp_bonenet/20260912T121852779982Z-a371f643`
+- Preservation evidence: `logs/source_after_phase7.json`, `logs/phase7_split_preservation.json`
 
 ## Open issues
 
-- Full HOSP-BoneNet training/checkpoint selection is pending Phase 7.
-- Optional task supervision and open-set/conformal calibration remain unavailable until their gates open.
+- Test evaluation is reserved for Phase 9.
+- Optional task supervision remains gated by unavailable/unreleased verified labels.
 - Classification-guided lesion maps have no claimed segmentation accuracy.
-- Patient/study IDs and qualified clinical verification are unavailable.
+- Multi-seed and clinical validation are Pending/Unavailable.
 
 ## Next action
 
-- Implement Phase 7 staged binary HOSP training on fit_train, select on validation only, and preserve test isolation. Use SOL. Do not rerun Phase 5 baselines, audits, splits, annotation conversion, or Phase 6 overfit unless inputs/code change. Never alter `dataset/Main`.
+- Run ordered Phase 8 optimization and ablations using validation data only. Preserve the selected Phase 7 run, test isolation, source data, and split generation. Use SOL.

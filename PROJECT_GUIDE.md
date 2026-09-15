@@ -1,6 +1,6 @@
 # Project guide
 
-Phases 1–6 establish the environment, audited data, leakage-controlled loaders, annotation workflow, four executed baselines, and the verified HOSP-BoneNet architecture. Full HOSP training remains pending.
+Phases 1–7 establish the environment, audited data, leakage-controlled loaders, annotation workflow, four baselines, the HOSP-BoneNet architecture, and its first complete validation-selected training run.
 
 ## 1. Project Overview
 
@@ -100,11 +100,11 @@ Pending calibration data and trained models. Hold out a grouped subset of offici
 
 ## 23. Training Loop
 
-The shared trainer uses AdamW at 1e-4, weight decay 1e-4, cosine scheduling, two warmup epochs, AMP, gradient clipping, a 40-epoch cap and patience 8. Validation AUROC selects checkpoints. CUDA is mandatory for final runs; memory exceptions preserve effective batch size.
+The shared trainer uses AdamW, cosine scheduling, warmup, AMP, gradient clipping and validation-AUROC checkpointing. Phase 7 ran binary Stage A for 35 epochs with early stopping, skipped B/C because their verified labels are unavailable, then fine-tuned Stage D for 10 epochs at 1e-5. Only fit_train and validation were constructed; test was not accessed.
 
 ## 24. Checkpointing
 
-Each immutable run records resolved config, environment, Git state, history, `best.pt`, `last.pt`, predictions and metrics. Checkpoints validate model/config identity before mutation and support exact resume state. Test evaluation occurs only after loading the validation-selected best checkpoint.
+Each immutable run records resolved config, environment, Git state, history, `best.pt`, `last.pt`, predictions and metrics. Checkpoints validate model/config identity before mutation and support exact resume. The selected Phase 7 artifact is Stage D epoch 6 (validation AUROC 0.958355); fresh reload reproduced logits, targets and IDs exactly. Test evaluation remains reserved for Phase 9.
 
 ## 25. Evaluation Metrics
 
@@ -124,7 +124,7 @@ Pending Phase 10. Upload, validate, predict, show calibrated confidence/abstenti
 
 ## 29. How to Run Each Phase
 
-Phase 1 environment: `python scripts/00_verify_environment.py`. Phase 2 audit: scripts 01–03. Phase 3 data: scripts 04–06. Phase 4 annotations: scripts 07–08. Phase 5 training: `python scripts/09_train_baseline.py --config configs/baseline_<model>.yaml`; validate with `./scripts/run_phase.ps1 -Action phase5`. Always use `.venv` and run pytest, Ruff and compileall after changes.
+Phase 1 environment: `python scripts/00_verify_environment.py`. Phase 2 audit: scripts 01–03. Phase 3 data: scripts 04–06. Phase 4 annotations: scripts 07–08. Phase 5 baselines: script 09. Phase 7 HOSP: `python scripts/10_train_hosp_bonenet.py --config configs/hosp_bonenet.yaml`; validate an existing run with `--validate-bundle <run_dir>`. Always use `.venv` and run pytest, Ruff and compileall after changes.
 
 ## 30. Common Errors and Troubleshooting
 

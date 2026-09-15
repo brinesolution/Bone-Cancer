@@ -1,33 +1,37 @@
 # Phase handoff
 
 Phase completed:
-Phase 6 — HOSP-BoneNet Implementation
+Phase 7 — Full Training and Checkpoint Selection
 
 Important outputs:
-- `src/bone_cancer_ai/models/hosp_bonenet/`
-- `src/bone_cancer_ai/losses/`
-- `configs/hosp_bonenet.yaml`
-- `artifacts/verification/phase6_tiny_overfit.json`
-- `logs/phase6_verification.json`
+- `experiments/hosp_bonenet/20260912T121852779982Z-a371f643`
+- `experiments/hosp_bonenet/20260912T121852779982Z-a371f643/stage_D/best.pt`
+- `configs/hosp_train.yaml`
+- `scripts/10_train_hosp_bonenet.py`
 
 Tests:
-- PASS — 337 pytest tests
-- PASS — 384×384 CUDA AMP forward/backward
-- PASS — 16-image overfit: loss ratio 0.1513, accuracy 1.0
-- PASS — Ruff, compileall, pip check, source/split preservation
+- PASS — 353 pytest tests
+- PASS — Ruff, compileall, pip check, environment/CUDA
+- PASS — bundle integrity and exact Stage A/D checkpoint reload
+- PASS — source and split preservation
 - CLEAN — independent review
 
+Important result:
+- Stage D epoch 6 selected by validation AUROC 0.958355
+- Validation AUPRC 0.964236; F1 0.902389
+- Test: Not run; reserved for Phase 9
+
 Outstanding issue:
-- Full HOSP training/checkpoints are Pending; optional task supervision remains gated.
+- Optional supervised branches remain gated; test evaluation is pending Phase 9.
 
 Do not rerun:
-- Phase 5 baselines, audit, splits, annotation conversion, or Phase 6 overfit unless inputs/code change.
+- Phase 7 full run or earlier audits/baselines unless relevant inputs or code change.
 
 Next model:
 SOL
 
 Next phase:
-Phase 7 — Full HOSP-BoneNet Training
+Phase 8 — Optimization and Accuracy Improvement
 
 Start command:
 `Get-Content PROJECT_STATE.md`

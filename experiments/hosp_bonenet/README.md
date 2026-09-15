@@ -1,28 +1,24 @@
-# experiments/hosp_bonenet
+# HOSP-BoneNet Experiments
 
-## Purpose
-Primary model runs.
+Purpose:
+Immutable training runs for the primary HOSP-BoneNet model.
 
-## Files
-README.md: folder contract; no produced files yet.
+Files:
+- `<run>/config.yaml` — resolved run settings
+- `<run>/stage_A|stage_D/` — checkpoints, histories, curves and validation outputs
+- `<run>/selection.json` — validation-selected checkpoint and artifact hashes
+- `<run>/status.json` — completion and test-access status
 
-## Inputs
-Verified inputs from the owning phase.
+Main libraries:
+PyTorch, timm, TorchMetrics, Matplotlib.
 
-## Outputs
-No outputs yet.
+Flow:
+fit_train → Stage A → Stage D → validation-AUROC selection
 
-## Main Libraries
-None in Phase 1.
+Run:
+`.venv\Scripts\python.exe scripts\10_train_hosp_bonenet.py --config configs\hosp_bonenet.yaml`
 
-## Important Functions / Classes
-No functions in this output folder; parent README identifies producers.
+Validate:
+`.venv\Scripts\python.exe scripts\10_train_hosp_bonenet.py --validate-bundle <run_dir>`
 
-## Theory
-Pending Phase 7; unique directories and real metrics only.
-
-## Execution
-Pending owning phase; see parent README.
-
-## Notes
-Do not edit generated records manually. Keep original dataset files untouched. Future-phase scaffolds are not completed functionality; update this README when implementation becomes active.
+Do not edit generated run artifacts or evaluate test before Phase 9.
