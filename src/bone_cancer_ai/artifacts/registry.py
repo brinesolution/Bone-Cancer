@@ -7,16 +7,24 @@ import json
 import os
 import re
 import shutil
-from collections.abc import Mapping
+import threading
+import time
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-_ALIAS_PATTERN = re.compile(r"[a-z][a-z0-9_-]*\Z")
+_ALIAS_PATTERN = re.compile(r"[a-z][a-z0-9_-]*(?:\.[a-z][a-z0-9_-]*)*\Z")
 _SHA256_PATTERN = re.compile(r"[0-9a-f]{64}\Z")
 _REGISTRY_RELATIVE_PATH = Path("artifacts/checkpoints/registry.json")
 _CHECKPOINT_DIRECTORY = _REGISTRY_RELATIVE_PATH.parent
+_REGISTRY_LOCK_RELATIVE_PATH = _CHECKPOINT_DIRECTORY / ".registry.lock"
+_REGISTRY_LOCK_TIMEOUT_SECONDS = 5.0
+_REGISTRY_LOCK_RETRY_SECONDS = 0.01
+_THREAD_LOCKS_GUARD = threading.Lock()
+_THREAD_LOCKS: dict[Path, threading.Lock] = {}
 _RECORD_FIELDS = {
     "alias",
     "model_family",
@@ -104,20 +112,23 @@ def promote_checkpoint(
         test_status=test_status,
     )
     registry_path = root / _REGISTRY_RELATIVE_PATH
-    registry = _load_registry(root, registry_path)
-    existing = registry.get(alias)
-    if existing is not None:
-        existing_record = _record_from_mapping(root, existing)
-        _verify_checkpoint(root, existing_record)
-        if existing_record != record:
-            raise ValueError(f"checkpoint alias {alias!r} already identifies a different artifact")
-        return existing_record
+    with _registry_lock(root):
+        registry = _load_registry(root, registry_path)
+        existing = registry.get(alias)
+        if existing is not None:
+            existing_record = _record_from_mapping(root, existing)
+            _verify_checkpoint(root, existing_record)
+            if existing_record != record:
+                raise ValueError(
+                    f"checkpoint alias {alias!r} already identifies a different artifact"
+                )
+            return existing_record
 
-    destination = record.absolute_checkpoint_path(root)
-    _promote_file(source, destination, digest)
-    registry[alias] = record.as_dict()
-    _write_registry(registry_path, registry)
-    return record
+        destination = record.absolute_checkpoint_path(root)
+        _promote_file(source, destination, digest)
+        registry[alias] = record.as_dict()
+        _write_registry(registry_path, registry)
+        return record
 
 
 def resolve_checkpoint(project_root: Path, alias: str) -> CheckpointRecord:
@@ -272,7 +283,8 @@ def _relative_to_root(root: Path, path: Path, *, name: str) -> str:
 def _validate_alias(alias: object) -> str:
     if not isinstance(alias, str) or not _ALIAS_PATTERN.fullmatch(alias):
         raise ValueError(
-            "checkpoint alias must contain lowercase letters, numbers, underscores, or hyphens"
+            "checkpoint alias must use dot-separated lowercase letters, numbers, "
+            "underscores, or hyphens"
         )
     return alias
 
@@ -306,3 +318,69 @@ def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
             raise ValueError("duplicate JSON key")
         result[key] = value
     return result
+
+
+@contextmanager
+def _registry_lock(project_root: Path) -> Iterator[None]:
+    """Serialize one project registry transaction across threads and processes."""
+    lock_path = project_root / _REGISTRY_LOCK_RELATIVE_PATH
+    deadline = time.monotonic() + _REGISTRY_LOCK_TIMEOUT_SECONDS
+    thread_lock = _thread_lock(lock_path)
+    remaining = deadline - time.monotonic()
+    if remaining <= 0 or not thread_lock.acquire(timeout=remaining):
+        raise TimeoutError("timed out waiting for checkpoint registry lock")
+    acquired = False
+    try:
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with lock_path.open("a+b") as stream:
+            try:
+                stream.seek(0, os.SEEK_END)
+                if stream.tell() == 0:
+                    stream.write(b"0")
+                    stream.flush()
+                stream.seek(0)
+                while not acquired:
+                    try:
+                        _try_file_lock(stream)
+                        acquired = True
+                    except OSError as error:
+                        if time.monotonic() >= deadline:
+                            raise TimeoutError(
+                                "timed out waiting for checkpoint registry lock"
+                            ) from error
+                        time.sleep(_REGISTRY_LOCK_RETRY_SECONDS)
+                yield
+            finally:
+                if acquired:
+                    _unlock_file(stream)
+    finally:
+        thread_lock.release()
+
+
+def _thread_lock(lock_path: Path) -> threading.Lock:
+    with _THREAD_LOCKS_GUARD:
+        return _THREAD_LOCKS.setdefault(lock_path, threading.Lock())
+
+
+def _try_file_lock(stream: Any) -> None:
+    if os.name == "nt":
+        import msvcrt
+
+        stream.seek(0)
+        msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
+    else:
+        import fcntl
+
+        fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+
+def _unlock_file(stream: Any) -> None:
+    if os.name == "nt":
+        import msvcrt
+
+        stream.seek(0)
+        msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
+    else:
+        import fcntl
+
+        fcntl.flock(stream.fileno(), fcntl.LOCK_UN)

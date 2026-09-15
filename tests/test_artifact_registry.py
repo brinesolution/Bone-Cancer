@@ -4,18 +4,22 @@ from __future__ import annotations
 
 import hashlib
 import json
+import threading
 from pathlib import Path
 
 import pytest
 
+from bone_cancer_ai.artifacts import registry as registry_module
 from bone_cancer_ai.artifacts.registry import promote_checkpoint, resolve_checkpoint
 
 
-def _promotion_details() -> dict[str, object]:
+def _promotion_details(
+    *, source_run: str = "experiments/hosp_bonenet/run-001"
+) -> dict[str, object]:
     return {
         "model_family": "hosp_bonenet",
         "phase": "phase_7",
-        "source_run": "experiments/hosp_bonenet/run-001",
+        "source_run": source_run,
         "selected_metric": {"split": "val", "name": "AUROC", "value": 0.91},
         "configuration_fingerprint": "a" * 64,
         "test_status": {"status": "not_run", "planned_phase": 9},
@@ -27,6 +31,59 @@ def _checkpoint(project_root: Path, payload: bytes = b"verified checkpoint") -> 
     checkpoint.parent.mkdir(parents=True)
     checkpoint.write_bytes(payload)
     return checkpoint
+
+
+def _second_checkpoint(project_root: Path, payload: bytes) -> Path:
+    checkpoint = project_root / "experiments" / "hosp_bonenet" / "run-002" / "best.pt"
+    checkpoint.parent.mkdir(parents=True)
+    checkpoint.write_bytes(payload)
+    return checkpoint
+
+
+def _synchronize_initial_registry_reads(monkeypatch: pytest.MonkeyPatch) -> None:
+    original_load = registry_module._load_registry
+    barrier = threading.Barrier(2)
+
+    def synchronized_load(root: Path, registry_path: Path) -> dict[str, object]:
+        if not registry_path.exists():
+            try:
+                barrier.wait(timeout=0.25)
+            except threading.BrokenBarrierError:
+                pass
+        return original_load(root, registry_path)
+
+    monkeypatch.setattr(registry_module, "_load_registry", synchronized_load)
+
+
+def _start_parallel_promotions(
+    promotions: list[tuple[str, Path, dict[str, object]]], project_root: Path
+) -> tuple[list[object], list[Exception]]:
+    start = threading.Event()
+    results: list[object] = []
+    errors: list[Exception] = []
+
+    def run(alias: str, checkpoint: Path, details: dict[str, object]) -> None:
+        start.wait()
+        try:
+            results.append(
+                promote_checkpoint(
+                    project_root, alias=alias, checkpoint_path=checkpoint, **details
+                )
+            )
+        except Exception as error:
+            errors.append(error)
+
+    workers = [
+        threading.Thread(target=run, args=(alias, checkpoint, details))
+        for alias, checkpoint, details in promotions
+    ]
+    for worker in workers:
+        worker.start()
+    start.set()
+    for worker in workers:
+        worker.join(timeout=5)
+        assert not worker.is_alive()
+    return results, errors
 
 
 def test_promotion_stores_a_project_relative_sha256_verified_checkpoint(tmp_path: Path) -> None:
@@ -143,3 +200,94 @@ def test_promotion_rejects_a_checkpoint_from_the_immutable_dataset(tmp_path: Pat
             checkpoint_path=source,
             **details,
         )
+
+
+def test_promotion_accepts_the_approved_dotted_alias(tmp_path: Path) -> None:
+    project_root = tmp_path / "project"
+    source = _checkpoint(project_root)
+
+    record = promote_checkpoint(
+        project_root,
+        alias="hosp_bonenet.phase7.selected",
+        checkpoint_path=source,
+        **_promotion_details(),
+    )
+
+    assert resolve_checkpoint(project_root, "hosp_bonenet.phase7.selected") == record
+
+
+def test_concurrent_promotions_preserve_distinct_aliases(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    project_root = tmp_path / "project"
+    first = _checkpoint(project_root, b"first checkpoint")
+    second = _second_checkpoint(project_root, b"second checkpoint")
+    _synchronize_initial_registry_reads(monkeypatch)
+
+    results, errors = _start_parallel_promotions(
+        [
+            ("hosp-one", first, _promotion_details()),
+            ("hosp-two", second, _promotion_details(source_run="experiments/hosp_bonenet/run-002")),
+        ],
+        project_root,
+    )
+
+    assert len(results) == 2
+    assert errors == []
+    assert resolve_checkpoint(project_root, "hosp-one").checkpoint_sha256 == hashlib.sha256(
+        b"first checkpoint"
+    ).hexdigest()
+    assert resolve_checkpoint(project_root, "hosp-two").checkpoint_sha256 == hashlib.sha256(
+        b"second checkpoint"
+    ).hexdigest()
+
+
+def test_concurrent_promotions_reject_a_conflicting_alias(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    project_root = tmp_path / "project"
+    first = _checkpoint(project_root, b"first checkpoint")
+    second = _second_checkpoint(project_root, b"second checkpoint")
+    _synchronize_initial_registry_reads(monkeypatch)
+
+    results, errors = _start_parallel_promotions(
+        [
+            ("hosp-selected", first, _promotion_details()),
+            (
+                "hosp-selected",
+                second,
+                _promotion_details(source_run="experiments/hosp_bonenet/run-002"),
+            ),
+        ],
+        project_root,
+    )
+
+    assert len(results) == 1
+    assert len(errors) == 1
+    assert "already identifies a different artifact" in str(errors[0])
+    assert resolve_checkpoint(project_root, "hosp-selected") == results[0]
+
+
+def test_promotion_falls_back_to_an_atomic_verified_copy_when_hard_links_fail(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    project_root = tmp_path / "project"
+    source = _checkpoint(project_root)
+
+    def hard_link_unavailable(*args: object) -> None:
+        del args
+        raise OSError("hard links unavailable")
+
+    monkeypatch.setattr(registry_module.os, "link", hard_link_unavailable)
+    record = promote_checkpoint(
+        project_root,
+        alias="hosp-selected",
+        checkpoint_path=source,
+        **_promotion_details(),
+    )
+    source.write_bytes(b"changed source checkpoint")
+
+    resolved = resolve_checkpoint(project_root, "hosp-selected")
+
+    assert resolved == record
+    assert (project_root / record.checkpoint_path).read_bytes() == b"verified checkpoint"
