@@ -16,10 +16,12 @@ Selected `best.pt` checkpoints from verified runs.
 Python standard library (`hashlib`, `json`, `os`, `shutil`).
 
 ## Important Functions / Classes
-`bone_cancer_ai.artifacts.registry.promote_checkpoint` and `resolve_checkpoint` own promotion.
+`bone_cancer_ai.artifacts.registry.promote_checkpoint` and `resolve_checkpoint` own promotion;
+`replace_alias=True` is required to replace a verified alias after a validated rerun.
 
 ## Theory
 Promotion hard-links when possible, falls back to an atomic copy, and refuses invalid or changed files.
+Alias replacement is explicit and retains prior content-addressed checkpoint files.
 
 ## Execution
 Later training phases register selected checkpoints through the shared API.

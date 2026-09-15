@@ -77,6 +77,7 @@ def promote_checkpoint(
     *,
     alias: str,
     checkpoint_path: Path,
+    replace_alias: bool = False,
     model_family: str,
     phase: str,
     source_run: str | Path,
@@ -84,8 +85,10 @@ def promote_checkpoint(
     configuration_fingerprint: str,
     test_status: Mapping[str, Any],
 ) -> CheckpointRecord:
-    """Promote one selected checkpoint and atomically register its immutable alias."""
+    """Promote a checkpoint; replace a different alias target only when explicitly requested."""
     root = Path(project_root).resolve()
+    if type(replace_alias) is not bool:
+        raise ValueError("replace_alias must be a boolean")
     source = _project_relative_path(root, checkpoint_path, name="checkpoint_path")
     if not source.is_file():
         raise FileNotFoundError(f"checkpoint is missing: {source}")
@@ -118,11 +121,12 @@ def promote_checkpoint(
         if existing is not None:
             existing_record = _record_from_mapping(root, existing)
             _verify_checkpoint(root, existing_record)
-            if existing_record != record:
+            if existing_record == record:
+                return existing_record
+            if not replace_alias:
                 raise ValueError(
                     f"checkpoint alias {alias!r} already identifies a different artifact"
                 )
-            return existing_record
 
         destination = record.absolute_checkpoint_path(root)
         _promote_file(source, destination, digest)

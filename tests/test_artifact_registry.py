@@ -291,3 +291,84 @@ def test_promotion_falls_back_to_an_atomic_verified_copy_when_hard_links_fail(
 
     assert resolved == record
     assert (project_root / record.checkpoint_path).read_bytes() == b"verified checkpoint"
+
+
+def test_promotion_requires_explicit_replacement_for_a_different_artifact(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "project"
+    first = _checkpoint(project_root, b"first checkpoint")
+    second = _second_checkpoint(project_root, b"second checkpoint")
+    promote_checkpoint(
+        project_root,
+        alias="hosp_bonenet.phase7.selected",
+        checkpoint_path=first,
+        **_promotion_details(),
+    )
+
+    with pytest.raises(ValueError, match="already identifies a different artifact"):
+        promote_checkpoint(
+            project_root,
+            alias="hosp_bonenet.phase7.selected",
+            checkpoint_path=second,
+            **_promotion_details(source_run="experiments/hosp_bonenet/run-002"),
+        )
+
+
+def test_explicit_alias_replacement_preserves_content_addressed_checkpoints(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "project"
+    first = _checkpoint(project_root, b"first checkpoint")
+    second = _second_checkpoint(project_root, b"second checkpoint")
+    original = promote_checkpoint(
+        project_root,
+        alias="hosp_bonenet.phase7.selected",
+        checkpoint_path=first,
+        **_promotion_details(),
+    )
+
+    replacement = promote_checkpoint(
+        project_root,
+        alias="hosp_bonenet.phase7.selected",
+        checkpoint_path=second,
+        replace_alias=True,
+        **_promotion_details(source_run="experiments/hosp_bonenet/run-002"),
+    )
+
+    assert resolve_checkpoint(project_root, "hosp_bonenet.phase7.selected") == replacement
+    assert (project_root / original.checkpoint_path).read_bytes() == b"first checkpoint"
+    assert (project_root / replacement.checkpoint_path).read_bytes() == b"second checkpoint"
+
+
+@pytest.mark.parametrize("failure", ["promotion", "registry_write"])
+def test_failed_alias_replacement_leaves_the_previous_alias_resolvable(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, failure: str
+) -> None:
+    project_root = tmp_path / "project"
+    first = _checkpoint(project_root, b"first checkpoint")
+    second = _second_checkpoint(project_root, b"second checkpoint")
+    original = promote_checkpoint(
+        project_root,
+        alias="hosp_bonenet.phase7.selected",
+        checkpoint_path=first,
+        **_promotion_details(),
+    )
+
+    def fail(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise OSError("injected replacement failure")
+
+    target = "_promote_file" if failure == "promotion" else "_write_registry"
+    monkeypatch.setattr(registry_module, target, fail)
+
+    with pytest.raises(OSError, match="injected replacement failure"):
+        promote_checkpoint(
+            project_root,
+            alias="hosp_bonenet.phase7.selected",
+            checkpoint_path=second,
+            replace_alias=True,
+            **_promotion_details(source_run="experiments/hosp_bonenet/run-002"),
+        )
+
+    assert resolve_checkpoint(project_root, "hosp_bonenet.phase7.selected") == original
