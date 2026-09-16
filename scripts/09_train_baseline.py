@@ -1499,20 +1499,17 @@ def _register_baseline_checkpoint(
     project_root: Path,
     replace_alias: bool,
 ) -> tuple[object, object | None]:
-    from bone_cancer_ai.artifacts.registry import promote_checkpoint, resolve_checkpoint
+    from bone_cancer_ai.artifacts.registry import (
+        promote_checkpoint_transaction,
+        resolve_checkpoint,
+    )
 
     metrics = _strict_json(run_dir / "metrics.json")
     validation = metrics.get("validation") if isinstance(metrics, Mapping) else None
     if not isinstance(validation, Mapping) or isinstance(validation.get("AUROC"), bool):
         raise ValueError("baseline validation AUROC is missing")
     selected_alias = _selected_checkpoint_alias(str(record["model"]))
-    try:
-        previous = resolve_checkpoint(project_root, selected_alias)
-    except ValueError as error:
-        if "is not registered" not in str(error):
-            raise
-        previous = None
-    promoted = promote_checkpoint(
+    promotion = promote_checkpoint_transaction(
         project_root,
         alias=selected_alias,
         checkpoint_path=run_dir / "best.pt",
@@ -1528,9 +1525,10 @@ def _register_baseline_checkpoint(
         configuration_fingerprint=_configuration_fingerprint(record),
         test_status={"status": "complete", "phase": 5},
     )
+    promoted = promotion.promoted
     if resolve_checkpoint(project_root, selected_alias) != promoted:
         raise ValueError(f"checkpoint alias {selected_alias!r} did not resolve after promotion")
-    return promoted, previous
+    return promoted, promotion.previous
 
 
 def _validated_phase5_runs(project_root: Path) -> list[tuple[str, Path, Any]]:

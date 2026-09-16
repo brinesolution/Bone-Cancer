@@ -693,7 +693,9 @@ def test_promotion_failure_preserves_prior_summary_and_selected_alias(
         del args, kwargs
         raise OSError("synthetic promotion failure")
 
-    monkeypatch.setattr(registry_module, "promote_checkpoint", fail_promotion)
+    monkeypatch.setattr(
+        registry_module, "promote_checkpoint_transaction", fail_promotion
+    )
     with pytest.raises(OSError, match="synthetic promotion failure"):
         baseline_cli.run_baseline(
             config,

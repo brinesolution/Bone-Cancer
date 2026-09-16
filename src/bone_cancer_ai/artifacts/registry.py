@@ -72,6 +72,14 @@ class CheckpointRecord:
         }
 
 
+@dataclass(frozen=True)
+class CheckpointPromotion:
+    """One atomic alias update and the exact record it replaced, if any."""
+
+    promoted: CheckpointRecord
+    previous: CheckpointRecord | None
+
+
 def promote_checkpoint(
     project_root: Path,
     *,
@@ -86,6 +94,34 @@ def promote_checkpoint(
     test_status: Mapping[str, Any],
 ) -> CheckpointRecord:
     """Promote a checkpoint; replace a matching selected alias only when explicitly requested."""
+    return promote_checkpoint_transaction(
+        project_root,
+        alias=alias,
+        checkpoint_path=checkpoint_path,
+        replace_alias=replace_alias,
+        model_family=model_family,
+        phase=phase,
+        source_run=source_run,
+        selected_metric=selected_metric,
+        configuration_fingerprint=configuration_fingerprint,
+        test_status=test_status,
+    ).promoted
+
+
+def promote_checkpoint_transaction(
+    project_root: Path,
+    *,
+    alias: str,
+    checkpoint_path: Path,
+    replace_alias: bool = False,
+    model_family: str,
+    phase: str,
+    source_run: str | Path,
+    selected_metric: Mapping[str, Any],
+    configuration_fingerprint: str,
+    test_status: Mapping[str, Any],
+) -> CheckpointPromotion:
+    """Promote a checkpoint and atomically return the exact prior alias record."""
     root = Path(project_root).resolve()
     if type(replace_alias) is not bool:
         raise ValueError("replace_alias must be a boolean")
@@ -118,11 +154,13 @@ def promote_checkpoint(
     with _registry_lock(root):
         registry = _load_registry(root, registry_path)
         existing = registry.get(alias)
+        previous: CheckpointRecord | None = None
         if existing is not None:
             existing_record = _record_from_mapping(root, existing)
             _verify_checkpoint(root, existing_record)
+            previous = existing_record
             if existing_record == record:
-                return existing_record
+                return CheckpointPromotion(promoted=existing_record, previous=existing_record)
             if not replace_alias:
                 raise ValueError(
                     f"checkpoint alias {alias!r} already identifies a different artifact"
@@ -143,7 +181,7 @@ def promote_checkpoint(
         _promote_file(source, destination, digest)
         registry[alias] = record.as_dict()
         _write_registry(registry_path, registry)
-        return record
+        return CheckpointPromotion(promoted=record, previous=previous)
 
 
 def resolve_checkpoint(project_root: Path, alias: str) -> CheckpointRecord:

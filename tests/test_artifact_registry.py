@@ -41,6 +41,13 @@ def _second_checkpoint(project_root: Path, payload: bytes) -> Path:
     return checkpoint
 
 
+def _third_checkpoint(project_root: Path, payload: bytes) -> Path:
+    checkpoint = project_root / "experiments" / "hosp_bonenet" / "run-003" / "best.pt"
+    checkpoint.parent.mkdir(parents=True)
+    checkpoint.write_bytes(payload)
+    return checkpoint
+
+
 def _synchronize_before_registry_lock(monkeypatch: pytest.MonkeyPatch) -> None:
     original_lock = registry_module._registry_lock
     barrier = threading.Barrier(2)
@@ -338,6 +345,82 @@ def test_explicit_alias_replacement_preserves_content_addressed_checkpoints(
     assert resolve_checkpoint(project_root, "hosp_bonenet.phase7.selected") == replacement
     assert (project_root / original.checkpoint_path).read_bytes() == b"first checkpoint"
     assert (project_root / replacement.checkpoint_path).read_bytes() == b"second checkpoint"
+
+
+def test_transactional_previous_record_prevents_stale_concurrent_rollback(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    transaction = registry_module.promote_checkpoint_transaction
+    project_root = tmp_path / "project"
+    original_checkpoint = _checkpoint(project_root, b"original checkpoint")
+    successful_checkpoint = _second_checkpoint(project_root, b"successful checkpoint")
+    failed_checkpoint = _third_checkpoint(project_root, b"failed publisher checkpoint")
+    alias = "hosp_bonenet.phase7.selected"
+    promote_checkpoint(
+        project_root,
+        alias=alias,
+        checkpoint_path=original_checkpoint,
+        **_promotion_details(),
+    )
+    original_lock = registry_module._registry_lock
+    failed_waiting = threading.Event()
+    release_failed = threading.Event()
+
+    @contextmanager
+    def controlled_lock(root: Path):
+        if threading.current_thread().name == "failed-publisher":
+            failed_waiting.set()
+            assert release_failed.wait(timeout=5)
+        with original_lock(root):
+            yield
+
+    monkeypatch.setattr(registry_module, "_registry_lock", controlled_lock)
+    failed_result: list[object] = []
+    failed_errors: list[Exception] = []
+
+    def delayed_failed_publisher() -> None:
+        try:
+            failed_result.append(
+                transaction(
+                    project_root,
+                    alias=alias,
+                    checkpoint_path=failed_checkpoint,
+                    replace_alias=True,
+                    **_promotion_details(
+                        source_run="experiments/hosp_bonenet/run-003"
+                    ),
+                )
+            )
+        except Exception as error:
+            failed_errors.append(error)
+
+    worker = threading.Thread(
+        target=delayed_failed_publisher, name="failed-publisher"
+    )
+    worker.start()
+    assert failed_waiting.wait(timeout=5)
+    successful = transaction(
+        project_root,
+        alias=alias,
+        checkpoint_path=successful_checkpoint,
+        replace_alias=True,
+        **_promotion_details(source_run="experiments/hosp_bonenet/run-002"),
+    )
+    release_failed.set()
+    worker.join(timeout=5)
+    assert not worker.is_alive()
+    assert failed_errors == []
+    failed = failed_result[0]
+    assert failed.previous == successful.promoted
+
+    registry_module.restore_checkpoint_alias(
+        project_root,
+        alias=alias,
+        expected_current=failed.promoted,
+        previous=failed.previous,
+    )
+
+    assert resolve_checkpoint(project_root, alias) == successful.promoted
 
 
 @pytest.mark.parametrize("failure", ["promotion", "registry_write"])
