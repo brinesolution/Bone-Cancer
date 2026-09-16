@@ -26,8 +26,10 @@ from bone_cancer_ai.evaluation.classification import binary_classification_metri
 from bone_cancer_ai.models.hosp_bonenet import create_hosp_bonenet
 from bone_cancer_ai.optimization.contracts import (
     METRIC_COLUMNS,
+    METRIC_TOLERANCE,
     ablation_model_config,
     atomic_text,
+    load_completed_stage,
     load_yaml,
     resolve_phase8_config,
     sha256_file,
@@ -42,6 +44,7 @@ from bone_cancer_ai.optimization.execution import (
     make_data,
     seed_everything,
     training_stage,
+    training_stage_definition,
 )
 from bone_cancer_ai.optimization.phase8 import (
     phase8_fingerprint,
@@ -50,6 +53,19 @@ from bone_cancer_ai.optimization.phase8 import (
 from bone_cancer_ai.training.trainer import BinaryTrainer
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
+
+
+def _phase8_source_paths(root: Path) -> dict[str, Path]:
+    """Return every package source that can affect Phase 8 execution."""
+    root = Path(root).resolve()
+    package = root / "src" / "bone_cancer_ai"
+    paths = sorted(path for path in package.rglob("*.py") if path.is_file())
+    paths.append(root / "scripts" / "11_tune_hosp_bonenet.py")
+    paths.append(root / "requirements" / "lock_windows_gpu.txt")
+    return {
+        f"source:{path.relative_to(root).as_posix()}": path
+        for path in sorted(paths)
+    }
 
 
 def _cache_throughput(context: Mapping[str, Any], run_dir: Path) -> None:
@@ -203,6 +219,12 @@ def _data_screen(context: Mapping[str, Any], run_dir: Path) -> dict[str, Any]:
     return result
 
 
+def _remove_pruned_checkpoints(trial_dir: Path) -> None:
+    """Discard terminal pruned weights while retaining their study evidence."""
+    for name in ("best.pt", "last.pt"):
+        (Path(trial_dir) / name).unlink(missing_ok=True)
+
+
 def _run_optuna(
     context: Mapping[str, Any], run_dir: Path, settings: Mapping[str, Any]
 ) -> dict[str, Any]:
@@ -271,8 +293,10 @@ def _run_optuna(
                 trial_dir / "status.json",
                 {"status": "pruned", "trial": trial.number, "signature": signature},
             )
+            _remove_pruned_checkpoints(trial_dir)
             raise
-        trial.set_user_attr("signature", signature)
+        trial.set_user_attr("stage_id", signature)
+        trial.set_user_attr("stage_signature", metrics["signature"])
         trial.set_user_attr("validation", strict_json(metrics["validation"], name="metrics"))
         trial.set_user_attr("stage", (Path("trials") / signature).as_posix())
         return float(metrics["validation"]["AUROC"])
@@ -391,26 +415,7 @@ def _context(config_path: Path, config: Mapping[str, Any]) -> dict[str, Any]:
         "schema": schema_path,
         "fit_train": split_dir / "fit_train.csv",
         "val": split_dir / "val.csv",
-        "phase8_contracts": root / "src/bone_cancer_ai/optimization/contracts.py",
-        "phase8_execution": root / "src/bone_cancer_ai/optimization/execution.py",
-        "phase8_workflow": root / "src/bone_cancer_ai/optimization/workflow.py",
-        "phase8_selection": root / "src/bone_cancer_ai/optimization/phase8.py",
-        "phase8_frozen_loader": root / "src/bone_cancer_ai/optimization/frozen.py",
-        "hosp_model": root / "src/bone_cancer_ai/models/hosp_bonenet/model.py",
-        "binary_trainer": root / "src/bone_cancer_ai/training/trainer.py",
-        "data_module": root / "src/bone_cancer_ai/data/datamodule.py",
-        "data_cache": root / "src/bone_cancer_ai/data/cache.py",
-        "dataset": root / "src/bone_cancer_ai/data/dataset.py",
-        "transforms": root / "src/bone_cancer_ai/data/transforms.py",
-        "samplers": root / "src/bone_cancer_ai/data/samplers.py",
-        "classification_metrics": root / "src/bone_cancer_ai/evaluation/classification.py",
-        "checkpointing": root / "src/bone_cancer_ai/training/checkpointing.py",
-        "optimizer": root / "src/bone_cancer_ai/training/optimizer.py",
-        "scheduler": root / "src/bone_cancer_ai/training/scheduler.py",
-        "amp": root / "src/bone_cancer_ai/training/amp.py",
-        "callbacks": root / "src/bone_cancer_ai/training/callbacks.py",
-        "artifact_registry": root / "src/bone_cancer_ai/artifacts/registry.py",
-        "dependency_lock": root / "requirements/lock_windows_gpu.txt",
+        **_phase8_source_paths(root),
     }
     input_hashes = {name: sha256_file(path) for name, path in input_paths.items()}
     full_fit_frame = pd.read_csv(input_paths["fit_train"])
@@ -454,6 +459,105 @@ def _run_directory(
     return root / f"phase8-{fingerprint[:12]}", fingerprint
 
 
+def _validated_training_stage(
+    stage_dir: Path,
+    expected_definition: Mapping[str, Any],
+) -> dict[str, Any]:
+    expected = strict_json(expected_definition, name="expected training stage")
+    recorded = load_yaml(stage_dir / "config.yaml")
+    if recorded != expected:
+        raise ValueError(f"training stage definition differs: {stage_dir}")
+    signature = phase8_fingerprint(expected)
+    validated = load_completed_stage(stage_dir, signature)
+    if validated is None:
+        raise ValueError(f"training stage is missing: {stage_dir}")
+    if validated.get("architecture") != expected["architecture"]:
+        raise ValueError(f"training stage architecture differs: {stage_dir}")
+    return validated
+
+
+def _metric_matches(left: object, right: object) -> bool:
+    try:
+        return math.isclose(
+            float(left),
+            float(right),
+            rel_tol=0.0,
+            abs_tol=METRIC_TOLERANCE,
+        )
+    except (TypeError, ValueError):
+        return False
+
+
+def _validate_ablation_table(
+    context: Mapping[str, Any],
+    run_dir: Path,
+    ablation: pd.DataFrame,
+    selection: Mapping[str, Any],
+    *,
+    settings: Mapping[str, Any],
+    hparams: Mapping[str, Any],
+) -> str:
+    """Bind every published ablation row to validated stage artifacts."""
+    expected_ids = [str(row["id"]) for row in context["config"]["ablations"]]
+    if ablation["ablation"].tolist() != [*expected_ids, "FULL"]:
+        raise ValueError("Phase 8 ablation rows are incomplete")
+    if not ablation["test_status"].eq("not_run").all():
+        raise ValueError("Phase 8 ablation table has invalid test status")
+    components = {
+        str(row["id"]): str(row["component"])
+        for row in context["config"]["ablations"]
+    }
+    rows = {str(row.ablation): row for row in ablation.itertuples(index=False)}
+    stage_config = context["config"]["ablation_run"]
+    candidates = []
+    for ablation_id in expected_ids:
+        row = rows[ablation_id]
+        definition = training_stage_definition(
+            context,
+            architecture=ablation_id,
+            settings=settings,
+            stage={
+                "name": f"ablation_{ablation_id}",
+                "epochs": int(stage_config["epochs"]),
+                "early_stopping_patience": int(stage_config["early_stopping_patience"]),
+                "train_samples": stage_config["train_samples"],
+                "val_samples": stage_config["val_samples"],
+            },
+            hparams=hparams,
+        )
+        stage = _validated_training_stage(
+            run_dir / "ablations" / ablation_id,
+            definition,
+        )
+        expected_text = {
+            "component": components[ablation_id],
+            "protocol": "phase7_warm_start_branch_ablation",
+            "initialization": context["parent_record"].alias,
+            "checkpoint_sha256": stage["checkpoint_sha256"],
+        }
+        for field, expected in expected_text.items():
+            if getattr(row, field) != expected:
+                raise ValueError(f"Phase 8 {ablation_id} ablation {field} differs")
+        for name in METRIC_COLUMNS:
+            if not _metric_matches(getattr(row, name), stage["validation"][name]):
+                raise ValueError(f"Phase 8 {ablation_id} ablation metric differs: {name}")
+        candidates.append(
+            {"candidate": ablation_id, "validation": stage["validation"]}
+        )
+
+    full = rows["FULL"]
+    if (
+        full.component != "selected supported binary configuration"
+        or full.protocol != selection.get("candidate")
+        or full.checkpoint_sha256 != selection.get("checkpoint_sha256")
+    ):
+        raise ValueError("Phase 8 FULL ablation metadata differs from selection")
+    for name in METRIC_COLUMNS:
+        if not _metric_matches(getattr(full, name), selection["validation"][name]):
+            raise ValueError(f"Phase 8 FULL ablation metric differs: {name}")
+    return str(select_validation_candidate(candidates)["candidate"])
+
+
 def _validate_local_bundle(
     context: Mapping[str, Any],
     run_dir: Path,
@@ -470,6 +574,7 @@ def _validate_local_bundle(
         "final_config.yaml", "selection.json", "hosp_ablation.csv", "trials.csv",
         "data_screen.csv", "cache_throughput.csv", "selected.pt",
         "selected_validation_predictions.csv", "provenance.json", "study.db",
+        "tuning_selection.json", "data_selection.json",
     }
     missing = [name for name in required if not (run_dir / name).is_file()]
     if missing:
@@ -483,6 +588,12 @@ def _validate_local_bundle(
     provenance = json.loads((run_dir / "provenance.json").read_text(encoding="utf-8"))
     if provenance.get("inputs") != context["input_hashes"]:
         raise ValueError("Phase 8 provenance input hashes are stale")
+    data_selection = json.loads(
+        (run_dir / "data_selection.json").read_text(encoding="utf-8")
+    )
+    settings = data_selection.get("settings")
+    if not isinstance(settings, dict):
+        raise ValueError("Phase 8 selected data settings are missing")
 
     model = create_hosp_bonenet(frozen["model"], context["schema"])
     checkpoint = torch.load(run_dir / "selected.pt", map_location="cpu", weights_only=True)
@@ -499,16 +610,11 @@ def _validate_local_bundle(
         if not math.isclose(
             float(recomputed[name]),
             float(selection["validation"][name]),
-            rel_tol=1e-10,
-            abs_tol=1e-10,
+            rel_tol=0.0,
+            abs_tol=METRIC_TOLERANCE,
         ):
             raise ValueError(f"selected validation metric differs: {name}")
 
-    ablation = pd.read_csv(run_dir / "hosp_ablation.csv")
-    if ablation["ablation"].tolist() != ["B0", "B1", "B2", "FULL"]:
-        raise ValueError("Phase 8 ablation rows are incomplete")
-    if not ablation["test_status"].eq("not_run").all():
-        raise ValueError("Phase 8 ablation table has invalid test status")
     trials = pd.read_csv(run_dir / "trials.csv")
     if len(trials) != 10 or trials["trial"].nunique() != 10 or int(trials["selected"].sum()) != 1:
         raise ValueError("Phase 8 trial table is incomplete or ambiguous")
@@ -532,6 +638,8 @@ def _validate_local_bundle(
     }
     if set(csv_by_number) != {trial.number for trial in terminal}:
         raise ValueError("Phase 8 study trial numbers differ from trials.csv")
+    validated_candidates = []
+    optimization = context["config"]["optimization"]
     for trial in terminal:
         row = csv_by_number[trial.number]
         if row.state != trial.state.name:
@@ -543,6 +651,140 @@ def _validate_local_bundle(
                     raise ValueError("Phase 8 study parameters differ from trials.csv")
             elif recorded != value:
                 raise ValueError("Phase 8 study parameters differ from trials.csv")
+        selected_flag = bool(row.selected)
+        if trial.state == optuna.trial.TrialState.PRUNED:
+            if selected_flag:
+                raise ValueError("a pruned Phase 8 trial cannot be selected")
+            continue
+        validation = trial.user_attrs.get("validation")
+        stage_relative = trial.user_attrs.get("stage")
+        stage_id = trial.user_attrs.get("stage_id")
+        stage_signature = trial.user_attrs.get("stage_signature")
+        if (
+            not isinstance(validation, dict)
+            or not isinstance(stage_relative, str)
+            or not isinstance(stage_id, str)
+            or not isinstance(stage_signature, str)
+        ):
+            raise ValueError("completed Phase 8 trial attributes are incomplete")
+        hparams = dict(trial.params)
+        hparams["gradient_accumulation_steps"] = (
+            4 if settings["batch_size"] == 2 else 2
+        )
+        expected_stage_id = phase8_fingerprint(hparams)[:16]
+        expected_relative = (Path("trials") / expected_stage_id).as_posix()
+        if stage_id != expected_stage_id or stage_relative != expected_relative:
+            raise ValueError("completed Phase 8 trial stage identity differs")
+        stage_path = (run_dir / stage_relative).resolve()
+        if not stage_path.is_relative_to((run_dir / "trials").resolve()):
+            raise ValueError("completed Phase 8 trial stage escapes its run")
+        definition = training_stage_definition(
+            context,
+            architecture="B2",
+            settings=settings,
+            stage={
+                "name": f"optuna_{expected_stage_id}",
+                "epochs": int(optimization["epochs"]),
+                "early_stopping_patience": int(
+                    optimization["early_stopping_patience"]
+                ),
+                "train_samples": int(optimization["train_samples"]),
+                "val_samples": int(optimization["val_samples"]),
+            },
+            hparams=hparams,
+        )
+        expected_stage_signature = phase8_fingerprint(definition)
+        if stage_signature != expected_stage_signature:
+            raise ValueError("completed Phase 8 trial signature differs")
+        stage = _validated_training_stage(stage_path, definition)
+        if stage.get("validation") != validation:
+            raise ValueError("completed Phase 8 trial differs from its stage")
+        if not _metric_matches(trial.value, validation["AUROC"]):
+            raise ValueError("Phase 8 trial objective differs from validation AUROC")
+        for name in METRIC_COLUMNS:
+            if not _metric_matches(getattr(row, name), validation[name]):
+                raise ValueError(f"Phase 8 trial metric differs from trials.csv: {name}")
+        validated_candidates.append(
+            {
+                "candidate": f"trial_{trial.number:03d}",
+                "validation": validation,
+                "params": trial.params,
+                "stage": stage_relative,
+            }
+        )
+
+    tuning_selection = json.loads(
+        (run_dir / "tuning_selection.json").read_text(encoding="utf-8")
+    )
+    expected_tuning_selection = select_validation_candidate(validated_candidates)
+    selected_rows = [row for row in csv_by_number.values() if bool(row.selected)]
+    if len(selected_rows) != 1:
+        raise ValueError("Phase 8 tuning selection is ambiguous")
+    selected_row = selected_rows[0]
+    selected_number = int(str(selected_row.trial).split("_")[1])
+    selected_trial = next(trial for trial in terminal if trial.number == selected_number)
+    if (
+        tuning_selection != expected_tuning_selection
+        or tuning_selection.get("candidate") != selected_row.trial
+        or tuning_selection.get("params") != selected_trial.params
+        or tuning_selection.get("stage") != selected_trial.user_attrs.get("stage")
+        or tuning_selection.get("validation") != selected_trial.user_attrs.get("validation")
+    ):
+        raise ValueError("Phase 8 tuning selection differs from the study")
+
+    best_hparams = dict(tuning_selection["params"])
+    best_hparams["gradient_accumulation_steps"] = (
+        4 if settings["batch_size"] == 2 else 2
+    )
+    ablation = pd.read_csv(run_dir / "hosp_ablation.csv")
+    best_architecture = _validate_ablation_table(
+        context,
+        run_dir,
+        ablation,
+        selection,
+        settings=settings,
+        hparams=best_hparams,
+    )
+    final_config = context["config"]["final_run"]
+    final_definition = training_stage_definition(
+        context,
+        architecture=best_architecture,
+        settings=settings,
+        stage={
+            "name": "final_confirmation",
+            "epochs": int(final_config["epochs"]),
+            "early_stopping_patience": int(final_config["early_stopping_patience"]),
+            "train_samples": final_config["train_samples"],
+            "val_samples": final_config["val_samples"],
+        },
+        hparams=best_hparams,
+    )
+    final_stage = _validated_training_stage(
+        run_dir / "final_candidate",
+        final_definition,
+    )
+    incumbent = evaluation_stage(context, run_dir / "incumbent", base_settings())
+    expected_selection = select_validation_candidate(
+        [
+            {
+                "candidate": "phase7_incumbent",
+                "validation": incumbent["validation"],
+            },
+            {
+                "candidate": "phase8_optimized",
+                "validation": final_stage["validation"],
+            },
+        ]
+    )
+    if selection.get("candidate") != expected_selection["candidate"]:
+        raise ValueError("Phase 8 selection differs from validated candidates")
+    selected_stage = (
+        incumbent if selection["candidate"] == "phase7_incumbent" else final_stage
+    )
+    if selection.get("validation") != selected_stage.get("validation"):
+        raise ValueError("Phase 8 selection metrics differ from selected candidate")
+    if selection.get("checkpoint_sha256") != selected_stage.get("checkpoint_sha256"):
+        raise ValueError("Phase 8 selection checkpoint differs from selected candidate")
 
     module, _ = make_data(context, frozen["data"], train_limit=None, val_limit=None)
     verifier = BinaryTrainer(
@@ -568,8 +810,12 @@ def _validate_local_bundle(
     actual = verifier.predict(module.loader("val"))
     if actual["sample_ids"] != predictions["sample_id"].astype(str).tolist():
         raise ValueError("selected checkpoint sample IDs differ from saved predictions")
-    saved_targets = torch.as_tensor(predictions["target"].to_numpy(), dtype=torch.long)
-    saved_logits = torch.as_tensor(predictions["logit"].to_numpy(), dtype=torch.float32)
+    saved_targets = torch.as_tensor(
+        predictions["target"].to_numpy(copy=True), dtype=torch.long
+    )
+    saved_logits = torch.as_tensor(
+        predictions["logit"].to_numpy(copy=True), dtype=torch.float32
+    )
     if not torch.equal(actual["targets"], saved_targets) or not torch.allclose(
         actual["logits"], saved_logits, rtol=1e-5, atol=1e-5
     ):

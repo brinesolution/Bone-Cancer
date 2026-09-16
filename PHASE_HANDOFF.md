@@ -1,40 +1,39 @@
 # Phase handoff
 
 Phase completed:
-Phase 7 — Full Training and Checkpoint Selection
+Phase 8 — Optimization, Ablations and Accuracy Improvement
 
 Important outputs:
-- `experiments/hosp_bonenet/20260912T121852779982Z-a371f643`
-- `artifacts/checkpoints/registry.json` (five verified aliases)
-- `workspace/cache/resized/cache_index.csv` (6,324 verified entries)
+- `experiments/optimization/hosp_bonenet/phase8-b8b362800417`
+- `configs/hosp_bonenet_phase8_final.yaml`
+- `artifacts/metrics/hosp_ablation.csv`
+- alias `hosp_bonenet.phase8.selected`
 
 Tests:
-- PASS — 411 pytest tests
-- PASS — Ruff, compileall, pip check, environment/CUDA
-- PASS — bundle/registry integrity and five no-training reruns
-- PASS — exact cache reuse and cached DataModule batches
-- PASS — source and split preservation
-- CLEAN — independent registry/cache review
+- PASS — 440 pytest tests
+- PASS — Ruff, compileall, pip check, CUDA/AMP
+- PASS — completed-run reuse and bundle/checksum validation
+- PASS — frozen CUDA load/forward and source preservation
+- PENDING — final independent review response
 
 Important result:
-- Stage D epoch 6 selected by validation AUROC 0.958355
-- Validation AUPRC 0.964236; F1 0.902389
-- Test: Not run; reserved for Phase 9
+- B2 selected; validation AUROC/AUPRC 0.958522/0.964397
+- 10 Optuna trials; test Not run
 
 Outstanding issue:
-- Optional supervised branches remain gated; test evaluation is pending Phase 9.
+- Phase 9 owns one-time test evaluation, explainability and visual QA.
 
 Do not rerun:
-- Phase 5/7 training or cache rebuild unless verified inputs/config/code change; default commands reuse.
+- Phase 8 training unless verified inputs/config/code change; default command reuses.
 
 Next model:
-SOL
+ASTRA
 
 Next phase:
-Phase 8 — Optimization and Accuracy Improvement
+Phase 9 — Final Evaluation, Explainability and Visual QA
 
 Start command:
-`Get-Content PROJECT_STATE.md; .venv\Scripts\python.exe tools/refresh_checkpoint_registry.py`
+`Get-Content PROJECT_STATE.md; Get-Content scripts\12_evaluate.py`
 
 Resume from:
 `PROJECT_STATE.md`

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 from collections.abc import Mapping
 from pathlib import Path
@@ -30,6 +31,7 @@ SUPPORTED_ABLATIONS = {
 METRIC_COLUMNS = (
     "AUROC", "AUPRC", "balanced_accuracy", "sensitivity", "F1", "ECE", "Brier"
 )
+METRIC_TOLERANCE = 1e-8
 
 
 def sha256_file(path: Path) -> str:
@@ -162,6 +164,31 @@ def ablation_model_config(
     return resolved
 
 
+def validate_recorded_metrics(
+    predictions: pd.DataFrame,
+    recorded: Mapping[str, Any],
+    *,
+    label: str,
+) -> dict[str, Any]:
+    """Recompute classification metrics and compare with CSV-rounding tolerance."""
+    if predictions.empty or not {"target", "logit"} <= set(predictions):
+        raise ValueError(f"{label} predictions are malformed")
+    if not isinstance(recorded, Mapping):
+        raise ValueError(f"{label} validation metrics are missing")
+    recomputed = binary_classification_metrics(predictions["logit"], predictions["target"])
+    for name in METRIC_COLUMNS:
+        try:
+            actual = float(recomputed[name])
+            expected = float(recorded[name])
+        except (KeyError, TypeError, ValueError) as error:
+            raise ValueError(f"{label} validation metric is invalid: {name}") from error
+        if not math.isfinite(actual) or not math.isfinite(expected):
+            raise ValueError(f"{label} validation metric is non-finite: {name}")
+        if not math.isclose(actual, expected, rel_tol=0.0, abs_tol=METRIC_TOLERANCE):
+            raise ValueError(f"{label} validation metric differs: {name}")
+    return recomputed
+
+
 def load_completed_stage(stage_dir: Path, signature: str) -> dict[str, Any] | None:
     """Return a complete stage only after signature and checkpoint verification."""
     metrics_path = Path(stage_dir) / "metrics.json"
@@ -195,17 +222,17 @@ def load_completed_stage(stage_dir: Path, signature: str) -> dict[str, Any] | No
         if not path.is_file() or sha256_file(path) != metrics.get(hash_field):
             raise ValueError(f"completed stage companion checksum differs: {filename}")
     predictions = pd.read_csv(Path(stage_dir) / "validation_predictions.csv")
-    if predictions.empty or not {"target", "logit"} <= set(predictions):
-        raise ValueError("completed stage predictions are malformed")
-    recomputed = binary_classification_metrics(predictions["logit"], predictions["target"])
-    for name in METRIC_COLUMNS:
-        if abs(float(recomputed[name]) - float(metrics["validation"][name])) > 1e-10:
-            raise ValueError(f"completed stage validation metric differs: {name}")
+    validate_recorded_metrics(
+        predictions,
+        metrics["validation"],
+        label="completed stage",
+    )
     return metrics
 
 
 __all__ = [
     "METRIC_COLUMNS",
+    "METRIC_TOLERANCE",
     "SUPPORTED_ABLATIONS",
     "ablation_model_config",
     "load_completed_stage",
@@ -213,6 +240,7 @@ __all__ = [
     "resolve_phase8_config",
     "sha256_file",
     "strict_json",
+    "validate_recorded_metrics",
     "write_json",
     "write_yaml",
 ]

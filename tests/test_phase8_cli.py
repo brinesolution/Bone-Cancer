@@ -13,7 +13,7 @@ import pytest
 import torch
 
 from bone_cancer_ai.evaluation.classification import binary_classification_metrics
-from bone_cancer_ai.optimization import workflow
+from bone_cancer_ai.optimization import execution, workflow
 
 
 def _module():
@@ -101,6 +101,18 @@ def test_completed_stage_requires_matching_signature_and_checkpoint_digest(
     with pytest.raises(ValueError, match="signature"):
         module.load_completed_stage(stage, "different")
 
+    metrics["validation"]["Brier"] += 5e-9
+    (stage / "metrics.json").write_text(json.dumps(metrics), encoding="utf-8")
+    assert module.load_completed_stage(stage, "expected") == metrics
+
+    metrics["validation"]["Brier"] += 1e-5
+    (stage / "metrics.json").write_text(json.dumps(metrics), encoding="utf-8")
+    with pytest.raises(ValueError, match="Brier"):
+        module.load_completed_stage(stage, "expected")
+
+    metrics["validation"] = validation
+    (stage / "metrics.json").write_text(json.dumps(metrics), encoding="utf-8")
+
     checkpoint.write_bytes(b"tampered")
     with pytest.raises(ValueError, match="checksum"):
         module.load_completed_stage(stage, "expected")
@@ -113,6 +125,223 @@ def test_phase8_context_rejects_noncanonical_config_before_reading_inputs(
 
     with pytest.raises(ValueError, match="canonical.*optimization.yaml"):
         workflow._context(tmp_path / "other.yaml", {})
+
+
+def test_phase8_source_fingerprint_covers_transitive_model_and_preprocessing_code() -> None:
+    root = Path(__file__).parents[1]
+
+    paths = set(workflow._phase8_source_paths(root).values())
+
+    assert root / "src/bone_cancer_ai/models/hosp_bonenet/encoder.py" in paths
+    assert root / "src/bone_cancer_ai/models/hosp_bonenet/fusion.py" in paths
+    assert root / "src/bone_cancer_ai/data/preprocessing.py" in paths
+    assert root / "src/bone_cancer_ai/losses/total.py" in paths
+
+
+def test_validated_training_stage_binds_expected_definition(tmp_path: Path) -> None:
+    stage = tmp_path / "stage"
+    stage.mkdir()
+    definition = {"architecture": "B2", "data": {"image_size": 384}}
+    workflow.write_yaml(stage / "config.yaml", definition)
+    checkpoint = stage / "best.pt"
+    torch.save({"model_state": {}}, checkpoint)
+    pd.DataFrame([{"epoch": 1, "val_AUROC": 1.0}]).to_csv(
+        stage / "history.csv", index=False
+    )
+    predictions = pd.DataFrame(
+        {
+            "sample_id": ["negative", "positive"],
+            "target": [0, 1],
+            "logit": [-2.0, 2.0],
+            "probability": torch.sigmoid(torch.tensor([-2.0, 2.0])).tolist(),
+        }
+    )
+    predictions.to_csv(stage / "validation_predictions.csv", index=False)
+    metrics = {
+        "status": "complete",
+        "signature": workflow.phase8_fingerprint(definition),
+        "architecture": "B2",
+        "best_checkpoint": "best.pt",
+        "checkpoint_sha256": workflow.sha256_file(checkpoint),
+        "config_sha256": workflow.sha256_file(stage / "config.yaml"),
+        "history_sha256": workflow.sha256_file(stage / "history.csv"),
+        "predictions_sha256": workflow.sha256_file(stage / "validation_predictions.csv"),
+        "validation": binary_classification_metrics(
+            predictions["logit"], predictions["target"]
+        ),
+    }
+    (stage / "metrics.json").write_text(json.dumps(metrics), encoding="utf-8")
+
+    assert workflow._validated_training_stage(stage, definition) == metrics
+    with pytest.raises(ValueError, match="definition differs"):
+        workflow._validated_training_stage(
+            stage, {"architecture": "B1", "data": {"image_size": 384}}
+        )
+
+
+def test_pruned_trial_cleanup_removes_only_terminal_checkpoints(tmp_path: Path) -> None:
+    (tmp_path / "best.pt").write_bytes(b"best")
+    (tmp_path / "last.pt").write_bytes(b"last")
+    (tmp_path / "status.json").write_text("{}", encoding="utf-8")
+
+    workflow._remove_pruned_checkpoints(tmp_path)
+
+    assert not (tmp_path / "best.pt").exists()
+    assert not (tmp_path / "last.pt").exists()
+    assert (tmp_path / "status.json").exists()
+
+
+def test_incumbent_reuse_requires_status_prediction_hash_and_recomputed_metrics(
+    tmp_path: Path,
+) -> None:
+    stage = tmp_path / "incumbent"
+    stage.mkdir()
+    settings = execution.base_settings()
+    parent_sha = "a" * 64
+    context = {
+        "base_model": {"name": "hosp_bonenet"},
+        "input_hashes": {"source": "b" * 64},
+        "parent_record": SimpleNamespace(checkpoint_sha256=parent_sha),
+    }
+    signature = workflow.phase8_fingerprint(
+        {
+            "kind": "incumbent_validation_recompute",
+            "model": context["base_model"],
+            "data": settings,
+            "parent_sha256": parent_sha,
+            "inputs": context["input_hashes"],
+        }
+    )
+    predictions = pd.DataFrame(
+        {
+            "sample_id": ["negative", "positive"],
+            "target": [0, 1],
+            "logit": [-2.0, 2.0],
+            "probability": torch.sigmoid(torch.tensor([-2.0, 2.0])).tolist(),
+        }
+    )
+    predictions.to_csv(stage / "validation_predictions.csv", index=False)
+    validation = binary_classification_metrics(predictions["logit"], predictions["target"])
+    payload = {
+        "status": "complete",
+        "signature": signature,
+        "architecture": "B2",
+        "validation": validation,
+        "checkpoint_sha256": parent_sha,
+        "predictions_sha256": workflow.sha256_file(stage / "validation_predictions.csv"),
+    }
+    (stage / "metrics.json").write_text(json.dumps(payload), encoding="utf-8")
+    (stage / "status.json").write_text(
+        json.dumps({"status": "complete", "signature": signature}), encoding="utf-8"
+    )
+
+    assert execution.evaluation_stage(context, stage, settings) == payload
+
+    (stage / "status.json").write_text(
+        json.dumps({"status": "running", "signature": signature}), encoding="utf-8"
+    )
+    assert execution.evaluation_stage(context, stage, settings) == payload
+    assert json.loads((stage / "status.json").read_text(encoding="utf-8")) == {
+        "status": "complete",
+        "signature": signature,
+    }
+
+    (stage / "validation_predictions.csv").write_text("tampered\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="prediction.*checksum"):
+        execution.evaluation_stage(context, stage, settings)
+
+
+def test_ablation_table_is_bound_to_stage_and_selection_metrics(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    metrics = {
+        name: {
+            "checkpoint_sha256": name.lower() * 32,
+            "validation": {
+                metric: float(index + 1) / 10
+                for index, metric in enumerate(workflow.METRIC_COLUMNS)
+            },
+        }
+        for name in ("B0", "B1", "B2")
+    }
+    monkeypatch.setattr(
+        workflow,
+        "training_stage_definition",
+        lambda context, architecture, **kwargs: {"architecture": architecture},
+    )
+    monkeypatch.setattr(
+        workflow,
+        "_validated_training_stage",
+        lambda stage, expected: metrics[stage.name],
+    )
+    selection = {
+        "candidate": "phase8_optimized",
+        "checkpoint_sha256": "f" * 64,
+        "validation": {
+            metric: float(index + 2) / 10
+            for index, metric in enumerate(workflow.METRIC_COLUMNS)
+        },
+    }
+    rows = []
+    components = {"B0": "plain", "B1": "localization", "B2": "fusion"}
+    for name, component in components.items():
+        row = {
+            "ablation": name,
+            "component": component,
+            "protocol": "phase7_warm_start_branch_ablation",
+            "initialization": "hosp_bonenet.phase7.selected",
+            "checkpoint_sha256": metrics[name]["checkpoint_sha256"],
+            "test_status": "not_run",
+            **metrics[name]["validation"],
+        }
+        rows.append(row)
+    rows.append(
+        {
+            "ablation": "FULL",
+            "component": "selected supported binary configuration",
+            "protocol": selection["candidate"],
+            "initialization": float("nan"),
+            "checkpoint_sha256": selection["checkpoint_sha256"],
+            "test_status": "not_run",
+            **selection["validation"],
+        }
+    )
+    frame = pd.DataFrame(rows)
+    context = {
+        "config": {
+            "ablations": [
+                {"id": name, "component": component}
+                for name, component in components.items()
+            ],
+            "ablation_run": {
+                "epochs": 1,
+                "early_stopping_patience": 1,
+                "train_samples": 2,
+                "val_samples": 2,
+            },
+        },
+        "parent_record": SimpleNamespace(alias="hosp_bonenet.phase7.selected"),
+    }
+
+    workflow._validate_ablation_table(
+        context,
+        tmp_path,
+        frame,
+        selection,
+        settings=execution.base_settings(),
+        hparams=execution.base_hparams(),
+    )
+
+    frame.loc[frame["ablation"] == "B1", "Brier"] += 0.01
+    with pytest.raises(ValueError, match="B1.*Brier"):
+        workflow._validate_ablation_table(
+            context,
+            tmp_path,
+            frame,
+            selection,
+            settings=execution.base_settings(),
+            hparams=execution.base_hparams(),
+        )
 
 
 def test_publication_failure_restores_alias_and_global_files(

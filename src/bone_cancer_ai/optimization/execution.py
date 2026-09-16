@@ -26,6 +26,7 @@ from bone_cancer_ai.optimization.contracts import (
     ablation_model_config,
     load_completed_stage,
     sha256_file,
+    validate_recorded_metrics,
     write_json,
     write_yaml,
 )
@@ -132,6 +133,31 @@ def _trainer_config(
     }
 
 
+def training_stage_definition(
+    context: Mapping[str, Any],
+    *,
+    architecture: str,
+    settings: Mapping[str, Any],
+    stage: Mapping[str, Any],
+    hparams: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Build the complete fingerprinted definition for one training stage."""
+    model_config = ablation_model_config(
+        context["base_model"], architecture, dropout=float(hparams["dropout"])
+    )
+    trainer_config = _trainer_config(context, stage, hparams)
+    return {
+        "architecture": architecture,
+        "model": model_config,
+        "training": trainer_config,
+        "data": dict(settings),
+        "train_samples": stage["train_samples"],
+        "val_samples": stage["val_samples"],
+        "parent_sha256": context["parent_record"].checkpoint_sha256,
+        "inputs": context["input_hashes"],
+    }
+
+
 def _deduplicate_best_last(
     stage_dir: Path, *, best_epoch: int, last_epoch: int
 ) -> None:
@@ -158,20 +184,15 @@ def training_stage(
     hparams: Mapping[str, Any],
     epoch_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
-    model_config = ablation_model_config(
-        context["base_model"], architecture, dropout=float(hparams["dropout"])
+    definition = training_stage_definition(
+        context,
+        architecture=architecture,
+        settings=settings,
+        stage=stage,
+        hparams=hparams,
     )
-    trainer_config = _trainer_config(context, stage, hparams)
-    definition = {
-        "architecture": architecture,
-        "model": model_config,
-        "training": trainer_config,
-        "data": dict(settings),
-        "train_samples": stage["train_samples"],
-        "val_samples": stage["val_samples"],
-        "parent_sha256": context["parent_record"].checkpoint_sha256,
-        "inputs": context["input_hashes"],
-    }
+    model_config = definition["model"]
+    trainer_config = definition["training"]
     signature = phase8_fingerprint(definition)
     completed = load_completed_stage(stage_dir, signature)
     if completed is not None:
@@ -265,12 +286,58 @@ def evaluation_stage(
     }
     signature = phase8_fingerprint(definition)
     metrics_path = stage_dir / "metrics.json"
+    status_path = stage_dir / "status.json"
     if metrics_path.is_file():
-        payload = json.loads(metrics_path.read_text(encoding="utf-8"))
-        if payload.get("signature") != signature:
-            raise ValueError("incumbent evaluation signature does not match")
-        return payload
+        status: object = None
+        if status_path.is_file():
+            try:
+                status = json.loads(status_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as error:
+                raise ValueError("incumbent status is malformed") from error
+        try:
+            payload = json.loads(metrics_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            if status == {"status": "complete", "signature": signature}:
+                raise ValueError("incumbent evaluation metadata is malformed") from error
+            payload = None
+        complete_status = {
+            "status": "complete",
+            "signature": signature,
+        }
+        try:
+            if not isinstance(payload, dict) or payload.get("status") != "complete":
+                raise ValueError("incumbent evaluation metrics are incomplete")
+            if payload.get("signature") != signature:
+                raise ValueError("incumbent evaluation signature does not match")
+            if payload.get("checkpoint_sha256") != context["parent_record"].checkpoint_sha256:
+                raise ValueError("incumbent checkpoint checksum does not match")
+            predictions_path = stage_dir / "validation_predictions.csv"
+            if (
+                not predictions_path.is_file()
+                or sha256_file(predictions_path) != payload.get("predictions_sha256")
+            ):
+                raise ValueError("incumbent prediction checksum does not match")
+            validate_recorded_metrics(
+                pd.read_csv(predictions_path),
+                payload.get("validation"),
+                label="incumbent",
+            )
+        except (OSError, ValueError):
+            if status == complete_status:
+                raise
+        else:
+            if status != complete_status:
+                write_json(status_path, complete_status)
+            return payload
+    elif status_path.is_file():
+        try:
+            orphan_status = json.loads(status_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            raise ValueError("incumbent status is malformed") from error
+        if orphan_status.get("status") == "complete":
+            raise ValueError("completed incumbent metrics are missing")
     stage_dir.mkdir(parents=True, exist_ok=True)
+    write_json(status_path, {"status": "running", "signature": signature})
     module, _ = make_data(context, settings, train_limit=None, val_limit=None)
     model_config = dict(context["base_model"])
     model_config["pretrained"] = False
@@ -298,6 +365,7 @@ def evaluation_stage(
     )
     prediction = trainer.predict(module.loader("val"))
     validation = binary_classification_metrics(prediction["logits"], prediction["targets"])
+    predictions_path = stage_dir / "validation_predictions.csv"
     pd.DataFrame(
         {
             "sample_id": prediction["sample_ids"],
@@ -305,15 +373,17 @@ def evaluation_stage(
             "logit": prediction["logits"].numpy(),
             "probability": prediction["logits"].sigmoid().numpy(),
         }
-    ).to_csv(stage_dir / "validation_predictions.csv", index=False)
+    ).to_csv(predictions_path, index=False)
     payload = {
         "status": "complete",
         "signature": signature,
         "architecture": "B2",
         "validation": validation,
         "checkpoint_sha256": context["parent_record"].checkpoint_sha256,
+        "predictions_sha256": sha256_file(predictions_path),
     }
     write_json(metrics_path, payload)
+    write_json(status_path, {"status": "complete", "signature": signature})
     return payload
 
 
@@ -345,5 +415,6 @@ __all__ = [
     "evaluation_stage",
     "make_data",
     "seed_everything",
+    "training_stage_definition",
     "training_stage",
 ]
