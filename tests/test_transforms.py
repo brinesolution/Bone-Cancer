@@ -529,19 +529,93 @@ def test_optional_cache_cli_is_deterministic_and_keeps_source_unchanged(tmp_path
     )
     repository = tmp_path.parents[2]
     script = repository / "scripts/05_build_cache.py"
-    command = [sys.executable, str(script), "--config", str(config), "--limit", "1"]
+    command = [
+        sys.executable,
+        str(script),
+        "--config",
+        str(config),
+        "--manifest",
+        "workspace/manifests/dataset_clean.csv",
+        "--output-dir",
+        "workspace/cache/debug",
+        "--index-output",
+        "workspace/cache/debug/cache_index.csv",
+        "--summary-output",
+        "logs/cache_debug_summary.json",
+        "--limit",
+        "1",
+    ]
     first = subprocess.run(command, cwd=project, capture_output=True, text=True, timeout=30)
     assert first.returncode == 0, first.stderr + first.stdout
-    cache_path = next((project / "workspace/cache/resized").glob("sample_*.png"))
+    cache_path = next((project / "workspace/cache/debug").glob("sample_*.png"))
     first_cache_hash = hashlib.sha256(cache_path.read_bytes()).hexdigest()
     second = subprocess.run(command, cwd=project, capture_output=True, text=True, timeout=30)
     assert second.returncode == 0, second.stderr + second.stdout
     assert hashlib.sha256(cache_path.read_bytes()).hexdigest() == first_cache_hash
     assert hashlib.sha256(image_path.read_bytes()).hexdigest() == source_before
-    index = pd.read_csv(project / "workspace/cache/resized/cache_index.csv")
+    index = pd.read_csv(project / "workspace/cache/debug/cache_index.csv")
     assert index["source_sha256"].tolist() == [source_before]
-    summary = json.loads((project / "logs/cache_summary.json").read_text())
+    summary = json.loads((project / "logs/cache_debug_summary.json").read_text())
     assert summary["cached"] == 1 and summary["failed"] == 0
+
+    partial = subprocess.run(
+        [sys.executable, str(script), "--config", str(config), "--splits", "fit_train"],
+        cwd=project,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert partial.returncode == 1
+    assert "requires exactly --splits fit_train val" in partial.stderr
+    unsafe_legacy = subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "--config",
+            str(config),
+            "--manifest",
+            "workspace/manifests/dataset_clean.csv",
+        ],
+        cwd=project,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert unsafe_legacy.returncode == 1
+    assert "requires separate debug output paths" in unsafe_legacy.stderr
+
+
+def test_cache_index_publication_failure_does_not_prune_existing_files(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import importlib.util
+
+    script = Path(__file__).parents[1] / "scripts/05_build_cache.py"
+    spec = importlib.util.spec_from_file_location("cache_builder_cli", script)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    output_dir = tmp_path / "cache"
+    output_dir.mkdir()
+    stale = output_dir / "stale.png"
+    stale.write_bytes(b"derived cache")
+
+    def fail_index(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise OSError("synthetic index publication failure")
+
+    monkeypatch.setattr(module, "atomic_write_csv", fail_index)
+    with pytest.raises(OSError, match="synthetic index publication failure"):
+        module.publish_cache_index(
+            pd.DataFrame([{"cache_path": str(output_dir / "current.png")}]),
+            {"failed": 0},
+            output_dir=output_dir,
+            index_path=output_dir / "cache_index.csv",
+            summary_path=tmp_path / "summary.json",
+            prune_stale=True,
+        )
+
+    assert stale.read_bytes() == b"derived cache"
 
 
 def test_cache_removes_stale_output_when_source_hash_changes(tmp_path):
@@ -581,3 +655,129 @@ def test_cache_removes_stale_output_when_source_hash_changes(tmp_path):
     assert summary["failed"] == 1
     assert second.iloc[0]["error_type"] == "SourceHashMismatch"
     assert not cache_path.exists()
+
+
+def test_cache_reuses_verified_entry_and_rebuilds_tampering(tmp_path):
+    from bone_cancer_ai.data.preprocessing import cache_manifest_images
+
+    source = tmp_path / "source.png"
+    Image.fromarray(np.arange(240, dtype=np.uint8).reshape(12, 20)).save(source)
+    source_hash = hashlib.sha256(source.read_bytes()).hexdigest()
+    manifest = pd.DataFrame(
+        [
+            {
+                "sample_id": "sample_safe",
+                "absolute_path": str(source),
+                "sha256": source_hash,
+                "assigned_split": "val",
+                "is_eligible": True,
+            }
+        ]
+    )
+    cache_dir = tmp_path / "cache"
+    first, first_summary = cache_manifest_images(
+        manifest,
+        cache_dir,
+        image_size=32,
+        force_grayscale=True,
+        pad_value=0,
+    )
+    cache_path = Path(first.iloc[0]["cache_path"])
+    first_mtime = cache_path.stat().st_mtime_ns
+    second, second_summary = cache_manifest_images(
+        manifest,
+        cache_dir,
+        image_size=32,
+        force_grayscale=True,
+        pad_value=0,
+        prior_index=first,
+    )
+    assert first_summary["built"] == 1
+    assert second_summary["reused"] == 1 and second_summary["built"] == 0
+    assert second.iloc[0]["action"] == "reused"
+    assert cache_path.stat().st_mtime_ns == first_mtime
+
+    cache_path.write_bytes(b"tampered cache")
+    repaired, repaired_summary = cache_manifest_images(
+        manifest,
+        cache_dir,
+        image_size=32,
+        force_grayscale=True,
+        pad_value=0,
+        prior_index=second,
+    )
+    assert repaired_summary["rebuilt"] == 1 and repaired_summary["failed"] == 0
+    assert hashlib.sha256(cache_path.read_bytes()).hexdigest() == repaired.iloc[0][
+        "cache_sha256"
+    ]
+
+
+def test_datamodule_cache_matches_uncached_validation_and_rejects_tampering(tmp_path):
+    from bone_cancer_ai.data.datamodule import BoneCancerDataModule
+    from bone_cancer_ai.data.preprocessing import cache_manifest_images
+
+    project = tmp_path / "project"
+    source = project / "dataset/Main"
+    source.mkdir(parents=True)
+    image_path = source / "image.png"
+    Image.fromarray(np.arange(240, dtype=np.uint8).reshape(12, 20)).save(image_path)
+    source_hash = hashlib.sha256(image_path.read_bytes()).hexdigest()
+    split_dir = project / "workspace/splits"
+    split_dir.parent.mkdir(parents=True)
+    _write_datamodule_split_fixtures(split_dir, image_path)
+    frames = {}
+    for split in ("fit_train", "calibration", "val", "test"):
+        frame = pd.read_csv(split_dir / f"{split}.csv")
+        frame["sha256"] = source_hash
+        frame.to_csv(split_dir / f"{split}.csv", index=False)
+        frames[split] = frame
+    cache_root = project / "workspace/cache/resized"
+    cache_index, summary = cache_manifest_images(
+        pd.concat([frames["fit_train"], frames["val"]], ignore_index=True),
+        cache_root,
+        image_size=32,
+        force_grayscale=True,
+        pad_value=0,
+    )
+    assert summary["cached"] == 2 and summary["failed"] == 0
+    index_path = cache_root / "cache_index.csv"
+    cache_index.to_csv(index_path, index=False)
+    base_config = {
+        "dataset_root": str(source),
+        "image_size": 32,
+        "seed": 42,
+        "preprocessing": {"force_grayscale": True, "pad_value": 0},
+        "augmentation": {"rotation_limit": 7},
+        "loader": {"batch_size": 1, "num_workers": 0},
+    }
+    uncached = BoneCancerDataModule(
+        split_dir, base_config, _schema(), splits=("fit_train", "val")
+    )
+    cached_config = {
+        **base_config,
+        "cache": {
+            "enabled": True,
+            "root": "workspace/cache/resized",
+            "index_path": "workspace/cache/resized/cache_index.csv",
+            "required_splits": ["fit_train", "val"],
+        },
+    }
+    cached = BoneCancerDataModule(
+        split_dir, cached_config, _schema(), splits=("fit_train", "val")
+    )
+    uncached.setup()
+    cached.setup()
+    assert torch.equal(uncached.datasets["val"][0]["image"], cached.datasets["val"][0]["image"])
+    assert torch.equal(
+        uncached.datasets["fit_train"][0]["image"],
+        cached.datasets["fit_train"][0]["image"],
+    )
+    assert cached.datasets["fit_train"].transform.augmentation_names
+    assert cached.datasets["val"][0]["metadata"]["original_height"] == 12
+
+    Path(cache_index.iloc[0]["cache_path"]).write_bytes(b"tampered cache")
+    rejected = BoneCancerDataModule(
+        split_dir, cached_config, _schema(), splits=("fit_train", "val")
+    )
+    with pytest.raises(ValueError, match="Cache checksum mismatch"):
+        rejected.setup()

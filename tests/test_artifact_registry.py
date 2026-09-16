@@ -423,6 +423,36 @@ def test_transactional_previous_record_prevents_stale_concurrent_rollback(
     assert resolve_checkpoint(project_root, alias) == successful.promoted
 
 
+def test_publication_lock_serializes_writers_for_the_same_alias(tmp_path: Path) -> None:
+    project_root = tmp_path / "project"
+    alias = "hosp_bonenet.phase7.selected"
+    first_inside = threading.Event()
+    release_first = threading.Event()
+    second_inside = threading.Event()
+
+    def first_writer() -> None:
+        with registry_module.checkpoint_publication_lock(project_root, alias):
+            first_inside.set()
+            assert release_first.wait(timeout=5)
+
+    def second_writer() -> None:
+        with registry_module.checkpoint_publication_lock(project_root, alias):
+            second_inside.set()
+
+    first = threading.Thread(target=first_writer)
+    second = threading.Thread(target=second_writer)
+    first.start()
+    assert first_inside.wait(timeout=5)
+    second.start()
+    assert not second_inside.wait(timeout=0.1)
+    release_first.set()
+    first.join(timeout=5)
+    second.join(timeout=5)
+
+    assert not first.is_alive() and not second.is_alive()
+    assert second_inside.is_set()
+
+
 @pytest.mark.parametrize("failure", ["promotion", "registry_write"])
 def test_failed_alias_replacement_leaves_the_previous_alias_resolvable(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, failure: str

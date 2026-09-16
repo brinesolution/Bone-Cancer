@@ -168,11 +168,18 @@ class BoneCancerDataset(Dataset):
     def __getitem__(self, index: int) -> dict[str, Any]:
         row = self.frame.iloc[index]
         labels, valid = self._labels(row)
+        cache_path = row.get("cache_path")
+        use_cache = not _missing(cache_path)
         try:
+            image_path = Path(str(cache_path if use_cache else row["absolute_path"]))
             image = decode_radiograph(
-                Path(str(row["absolute_path"])), force_grayscale=self.force_grayscale
+                image_path, force_grayscale=False if use_cache else self.force_grayscale
             )
         except Exception as exc:
+            if use_cache:
+                raise RuntimeError(
+                    f"Required cache entry failed for sample {row['sample_id']}"
+                ) from exc
             return self._invalid_item(row, labels, exc)
         mask = None
         mask_valid = False
@@ -205,8 +212,8 @@ class BoneCancerDataset(Dataset):
             "metadata": {
                 "sample_id": str(row["sample_id"]),
                 "assigned_split": str(row["assigned_split"]),
-                "original_height": int(image.shape[0]),
-                "original_width": int(image.shape[1]),
+                "original_height": int(row.get("height", image.shape[0]) or image.shape[0]),
+                "original_width": int(row.get("width", image.shape[1]) or image.shape[1]),
                 "load_error": "",
             },
         }

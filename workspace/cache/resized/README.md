@@ -1,28 +1,15 @@
 # workspace/cache/resized
 
-## Purpose
-Derived resized radiographs.
+Purpose: Local pre-augmentation cache for `fit_train` and `val`.
 
-## Files
-Opaque `sample_*.png` images plus `cache_index.csv`. Phase 3 locally generated 16 smoke entries; generated files are Git-ignored.
+Files:
+- `sample_*.png` — 384×384 lossless derived images.
+- `cache_index.csv` — source/cache hashes, split, geometry, and format fingerprint.
 
-## Inputs
-Eligible clean-manifest paths, source hashes, and `configs/data.yaml` preprocessing fields.
+Flow: verified source bytes → deterministic grayscale/resize/pad → cached pixels.
 
-## Outputs
-Aspect-padded, grayscale-replicated RGB PNGs with 384×384 dimensions and index traceability.
+Libraries: Pillow, OpenCV, Pandas, hashlib.
 
-## Main Libraries
-Pillow, OpenCV, hashlib and Pandas.
+Run: `.venv\Scripts\python.exe scripts/05_build_cache.py`
 
-## Important Functions / Classes
-`cache_manifest_images` in `data/preprocessing.py`; `scripts/05_build_cache.py` is the producer.
-
-## Theory
-One scale factor preserves anatomy, central padding makes a square canvas, and source/cache hashes make derivation auditable.
-
-## Execution
-`python scripts/05_build_cache.py --limit 16`.
-
-## Notes
-Do not edit generated images/indexes manually or treat cached pixels as new labels. The source remains authoritative.
+The DataModule rejects missing, stale, changed, or checksum-invalid entries. Generated files are Git-ignored; do not edit them manually.

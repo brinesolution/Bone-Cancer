@@ -1,5 +1,8 @@
 # Changelog
 
+2026-09-16 — Added checksum-backed selected-checkpoint aliases and validated Phase 5/7 rerun reuse.
+2026-09-16 — Added the versioned 6,324-image fit/validation cache with strict integrity checks and dynamic augmentation.
+
 2026-09-14 — Completed staged HOSP-BoneNet training; selected Stage D epoch 6 by validation AUROC 0.958355 with exact checkpoint reload and no test access.
 
 2026-09-12 — Implemented and verified configuration-gated HOSP-BoneNet, masked multitask losses, CUDA AMP checks, and a real 16-image overfit smoke test.

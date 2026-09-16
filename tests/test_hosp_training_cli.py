@@ -186,6 +186,25 @@ def test_production_config_resolves_frozen_binary_two_stage_policy() -> None:
     assert len(record["inputs"]["schema_sha256"]) == 64
 
 
+def test_operational_cache_config_does_not_change_hosp_run_identity(tmp_path: Path) -> None:
+    model_path = _project_config(tmp_path)
+    before = hosp_cli.resolve_config(model_path)
+    data_path = model_path.parent / "data.yaml"
+    data = yaml.safe_load(data_path.read_text(encoding="utf-8"))
+    data["cache"] = {
+        "enabled": True,
+        "root": "workspace/cache/resized",
+        "index_path": "workspace/cache/resized/cache_index.csv",
+        "required_splits": ["fit_train", "val"],
+    }
+    data_path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+
+    after = hosp_cli.resolve_config(model_path)
+
+    assert after["record"] == before["record"]
+    assert after["runtime"]["data"]["cache"] == data["cache"]
+
+
 @pytest.mark.parametrize(
     ("change", "message"),
     [

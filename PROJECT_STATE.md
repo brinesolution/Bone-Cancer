@@ -20,7 +20,7 @@ Next phase: Phase 8 — Optimization and Accuracy Improvement
 - Derived splits: fit 4,871; calibration 857; validation 1,453; test 1,882
 - Split generation: `de64a489fff7202ec39d442e4b26a5a5c0d7e2c7db8ed7a8587601ef1cd28590`
 - Leakage: zero record/sample/group overlap; all split hashes preserved
-- Inputs: grayscale-replicated RGB, aspect-preserving 384×384 pad, ImageNet normalization
+- Inputs: versioned 384×384 cache for fit_train/val; dynamic fit augmentation and ImageNet normalization
 
 ## Supervision gates
 
@@ -51,13 +51,21 @@ Next phase: Phase 8 — Optimization and Accuracy Improvement
 - Swin-Tiny test AUROC/AUPRC: 0.96517 / 0.96355
 - HOSP-BoneNet validation AUROC/AUPRC: 0.95835 / 0.96424; test: Not run
 
+## Artifact reuse
+
+- Registry: five SHA-256-verified selected aliases (four Phase 5 baselines + Phase 7 HOSP)
+- Reruns: exact completed runs reuse automatically; interrupted HOSP runs resume; `--force-new-run` retrains
+- Cache: 6,324 PNGs / 383,787,525 bytes; fit_train 4,871 + val 1,453
+- Cache rerun: 6,324 reused, 0 built/rebuilt/failed; PNG timestamps and sizes unchanged
+
 ## Verification
 
-- `pytest -q`: 353 passed
+- `pytest -q`: 411 passed
 - Ruff, compileall, pip check, environment/CUDA check: PASS
 - Run-bundle validation and both-stage exact checkpoint reload: PASS
+- Registry refresh, five no-training reruns, cache/DataModule validation: PASS
 - Source and split preservation: PASS
-- Independent Phase 7 review: CLEAN
+- Independent registry/cache reviews: CLEAN
 
 ## Important paths
 
@@ -66,6 +74,8 @@ Next phase: Phase 8 — Optimization and Accuracy Improvement
 - Trainer: `src/bone_cancer_ai/training/trainer.py`
 - Entry point: `scripts/10_train_hosp_bonenet.py`
 - Selected run: `experiments/hosp_bonenet/20260912T121852779982Z-a371f643`
+- Registry: `artifacts/checkpoints/registry.json`
+- Cache index: `workspace/cache/resized/cache_index.csv`
 - Preservation evidence: `logs/source_after_phase7.json`, `logs/phase7_split_preservation.json`
 
 ## Open issues
@@ -77,4 +87,4 @@ Next phase: Phase 8 — Optimization and Accuracy Improvement
 
 ## Next action
 
-- Run ordered Phase 8 optimization and ablations using validation data only. Preserve the selected Phase 7 run, test isolation, source data, and split generation. Use SOL.
+- Run Phase 8 optimization from `hosp_bonenet.phase7.selected`, reusing the verified cache. Preserve test isolation and use SOL.

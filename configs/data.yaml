@@ -59,3 +59,8 @@ loader:
   pin_memory: true
   persistent_workers: false
   sampling: shuffle
+cache:
+  enabled: true
+  root: workspace/cache/resized
+  index_path: workspace/cache/resized/cache_index.csv
+  required_splits: [fit_train, val]

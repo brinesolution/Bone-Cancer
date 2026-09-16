@@ -21,7 +21,9 @@ _SHA256_PATTERN = re.compile(r"[0-9a-f]{64}\Z")
 _REGISTRY_RELATIVE_PATH = Path("artifacts/checkpoints/registry.json")
 _CHECKPOINT_DIRECTORY = _REGISTRY_RELATIVE_PATH.parent
 _REGISTRY_LOCK_RELATIVE_PATH = _CHECKPOINT_DIRECTORY / ".registry.lock"
+_PUBLICATION_LOCK_DIRECTORY = _CHECKPOINT_DIRECTORY / ".publication-locks"
 _REGISTRY_LOCK_TIMEOUT_SECONDS = 5.0
+_PUBLICATION_LOCK_TIMEOUT_SECONDS = 60.0
 _REGISTRY_LOCK_RETRY_SECONDS = 0.01
 _THREAD_LOCKS_GUARD = threading.Lock()
 _THREAD_LOCKS: dict[Path, threading.Lock] = {}
@@ -234,6 +236,16 @@ def restore_checkpoint_alias(
             registry_path.unlink(missing_ok=True)
 
 
+@contextmanager
+def checkpoint_publication_lock(project_root: Path, alias: str) -> Iterator[None]:
+    """Serialize alias promotion with publication of its companion metadata."""
+    root = Path(project_root).resolve()
+    safe_alias = _validate_alias(alias)
+    lock_path = root / _PUBLICATION_LOCK_DIRECTORY / f"{safe_alias}.lock"
+    with _file_lock(lock_path, timeout_seconds=_PUBLICATION_LOCK_TIMEOUT_SECONDS):
+        yield
+
+
 def _make_record(
     *,
     root: Path,
@@ -410,8 +422,16 @@ def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
 @contextmanager
 def _registry_lock(project_root: Path) -> Iterator[None]:
     """Serialize one project registry transaction across threads and processes."""
-    lock_path = project_root / _REGISTRY_LOCK_RELATIVE_PATH
-    deadline = time.monotonic() + _REGISTRY_LOCK_TIMEOUT_SECONDS
+    with _file_lock(project_root / _REGISTRY_LOCK_RELATIVE_PATH):
+        yield
+
+
+@contextmanager
+def _file_lock(
+    lock_path: Path, *, timeout_seconds: float = _REGISTRY_LOCK_TIMEOUT_SECONDS
+) -> Iterator[None]:
+    """Wait briefly for one project-local thread/process lock."""
+    deadline = time.monotonic() + timeout_seconds
     thread_lock = _thread_lock(lock_path)
     remaining = deadline - time.monotonic()
     if remaining <= 0 or not thread_lock.acquire(timeout=remaining):

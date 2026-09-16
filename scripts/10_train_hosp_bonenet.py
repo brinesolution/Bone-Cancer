@@ -402,6 +402,8 @@ def resolve_config(model_config_path: Path) -> dict[str, Any]:
             "sampling": str(data_document.get("loader", {}).get("sampling", "shuffle")),
         },
     }
+    if "cache" in data_document:
+        runtime_data["cache"] = json.loads(json.dumps(data_document["cache"]))
     record = {
         **dict(train_document),
         "model_name": "hosp_bonenet",

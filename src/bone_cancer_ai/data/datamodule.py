@@ -14,6 +14,7 @@ import pandas as pd
 import torch
 from torch.utils.data import DataLoader, get_worker_info
 
+from bone_cancer_ai.data.cache import attach_verified_cache, resolve_cache_settings
 from bone_cancer_ai.data.dataset import BoneCancerDataset
 from bone_cancer_ai.data.samplers import (
     make_weighted_sampler,
@@ -120,6 +121,23 @@ class BoneCancerDataModule:
         ]
         if outside:
             raise ValueError("Split manifest contains a path outside dataset_root")
+
+        project_root = self.dataset_root.parent.parent
+        cache_settings = resolve_cache_settings(self.config, project_root=project_root)
+        if cache_settings is not None:
+            if bool(self.label_schema.get("localization", {}).get("masks_verified", False)):
+                raise ValueError("disable the prepared-image cache when verified masks are enabled")
+            cache_root, index_path, required_splits = cache_settings
+            attach_verified_cache(
+                frames,
+                project_root=project_root,
+                cache_root=cache_root,
+                index_path=index_path,
+                required_splits=required_splits,
+                image_size=image_size,
+                force_grayscale=bool(preprocessing.get("force_grayscale", True)),
+                pad_value=int(preprocessing.get("pad_value", 0)),
+            )
 
         for offset, split in enumerate(self.splits):
             frame = frames[split]

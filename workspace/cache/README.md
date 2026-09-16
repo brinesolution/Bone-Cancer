@@ -1,28 +1,17 @@
 # workspace/cache
 
-## Purpose
-Derived image cache.
+Purpose: Verified derived pixels that avoid repeated decode/resize work.
 
-## Files
-resized/: aspect-preserving resized data; normalized/: optional validated derived arrays.
+Files:
+- `resized/` — versioned 384×384 PNGs and `cache_index.csv`.
+- `normalized/` — reserved; currently unused.
 
-## Inputs
-Eligible rows from `dataset_clean.csv`, verified source SHA-256 values, and preprocessing config.
+Inputs: `fit_train.csv`, `val.csv`, source SHA-256, and preprocessing config.
 
-## Outputs
-Optional derived 384×384 PNGs and `cache_index.csv` under `resized/`. Phase 3 verified a bounded 16-image cache; the DataLoader still reads originals unless a future explicit cache integration is validated.
+Flow: immutable source → hash/decode/resize/pad → verified PNG → dynamic augmentation.
 
-## Main Libraries
-Pillow, OpenCV, Pandas and hashlib.
+Libraries: Pillow, OpenCV, Pandas, hashlib.
 
-## Important Functions / Classes
-`cache_manifest_images` validates each source hash, applies the same decode/resize/pad contract, uses opaque filenames, writes atomically, and records source/cache hashes plus a preprocessing fingerprint.
+Run: `.venv\Scripts\python.exe scripts/05_build_cache.py`
 
-## Theory
-Cache validity depends on both source bytes and transformation configuration. Cache files are derived performance aids and cannot replace the audit manifest.
-
-## Execution
-Optional smoke run: `python scripts/05_build_cache.py --limit 16`. Omit `--limit` only when a complete cache is intentionally needed.
-
-## Notes
-Do not edit cache files/indexes or copy them into `dataset/Main`. Delete/rebuild stale derived cache only through a reviewed workflow; source files remain immutable.
+Do not edit cache files/indexes or place derived files in `dataset/Main`.

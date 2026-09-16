@@ -92,6 +92,7 @@ DATA_CONFIG_KEYS = {
     "preprocessing",
     "augmentation",
     "loader",
+    "cache",
 }
 FINAL_POLICY = {
     "epochs": 40,
@@ -165,6 +166,7 @@ LOADER_POLICY = {
 }
 EXPECTED_SCHEMA_SHA256 = "6248ff8274f5ad5d26d046f851d672f33390d0a8ef07d6c4b6a0eee11dcefe95"
 SPLIT_NAMES = ("fit_train", "calibration", "val", "test")
+BASELINE_PUBLICATION_LOCK = "baseline.phase5.publication"
 NESTED_DATA_KEYS = {
     "preprocessing": {
         "preserve_aspect_ratio",
@@ -409,9 +411,33 @@ def _validate_data_config(data: Mapping[str, Any]) -> None:
     for key in ("workspace_root", "artifacts_root", "logs_root"):
         if key in data and (not isinstance(data[key], str) or not data[key].strip()):
             raise ValueError(f"{key} must be a non-empty path string")
-    for key in ("preprocessing", "augmentation", "loader", "audit", "provenance", "split_policy"):
+    for key in (
+        "preprocessing",
+        "augmentation",
+        "loader",
+        "audit",
+        "provenance",
+        "split_policy",
+        "cache",
+    ):
         if key in data and not isinstance(data[key], Mapping):
             raise ValueError(f"{key} must be a mapping")
+    cache = data.get("cache")
+    if cache is not None:
+        if set(cache) != {"enabled", "root", "index_path", "required_splits"}:
+            raise ValueError("cache config keys are incomplete or unknown")
+        if type(cache["enabled"]) is not bool:
+            raise ValueError("cache.enabled must be boolean")
+        if any(not isinstance(cache[key], str) or not cache[key] for key in ("root", "index_path")):
+            raise ValueError("cache paths must be non-empty strings")
+        splits = cache["required_splits"]
+        if (
+            not isinstance(splits, list)
+            or not splits
+            or len(set(splits)) != len(splits)
+            or any(split not in {"fit_train", "val"} for split in splits)
+        ):
+            raise ValueError("cache.required_splits must contain only fit_train and val")
     for key, allowed in NESTED_DATA_KEYS.items():
         unknown_nested = set(data.get(key, {})) - allowed
         if unknown_nested:
@@ -804,6 +830,8 @@ def resolve_config(
         **runtime_data,
         "dataset_root": _relative_path(dataset_root, project_root),
     }
+    if "cache" in data_config:
+        runtime_data["cache"] = json.loads(json.dumps(data_config["cache"]))
     record["run_type"] = "final" if is_final_run_config(record) else "smoke"
     runtime = {
         "project_root": str(project_root),
@@ -1034,7 +1062,6 @@ def run_baseline(
         atomic_write_csv,
         atomic_write_json,
         confusion_matrix_frame,
-        update_baseline_summary,
     )
 
     run_dir = _new_run_directory(Path(runtime["output_root"]), str(record["model"]))
@@ -1158,27 +1185,13 @@ def run_baseline(
                 summary_row,
                 dependencies=checkpoint_validation,
             )
-            promoted, previous = _register_baseline_checkpoint(
+            _publish_baseline_selection(
                 run_dir,
                 record,
+                summary_row,
                 project_root=project_root,
                 replace_alias=force_new_run,
             )
-            try:
-                update_baseline_summary(
-                    project_root / "artifacts" / "metrics" / "baseline_summary.csv",
-                    summary_row,
-                )
-            except Exception:
-                from bone_cancer_ai.artifacts.registry import restore_checkpoint_alias
-
-                restore_checkpoint_alias(
-                    project_root,
-                    alias=_selected_checkpoint_alias(str(record["model"])),
-                    expected_current=promoted,
-                    previous=previous,
-                )
-                raise
         return run_dir
     except torch.cuda.OutOfMemoryError as error:
         guidance = (
@@ -1529,6 +1542,44 @@ def _register_baseline_checkpoint(
     if resolve_checkpoint(project_root, selected_alias) != promoted:
         raise ValueError(f"checkpoint alias {selected_alias!r} did not resolve after promotion")
     return promoted, promotion.previous
+
+
+def _publish_baseline_selection(
+    run_dir: Path,
+    record: Mapping[str, Any],
+    summary_row: Mapping[str, Any],
+    *,
+    project_root: Path,
+    replace_alias: bool,
+) -> None:
+    """Publish one selected alias and summary row as a serialized unit."""
+    from bone_cancer_ai.artifacts.registry import (
+        checkpoint_publication_lock,
+        restore_checkpoint_alias,
+    )
+    from bone_cancer_ai.evaluation.reports import update_baseline_summary
+
+    selected_alias = _selected_checkpoint_alias(str(record["model"]))
+    with checkpoint_publication_lock(project_root, BASELINE_PUBLICATION_LOCK):
+        promoted, previous = _register_baseline_checkpoint(
+            run_dir,
+            record,
+            project_root=project_root,
+            replace_alias=replace_alias,
+        )
+        try:
+            update_baseline_summary(
+                project_root / "artifacts" / "metrics" / "baseline_summary.csv",
+                dict(summary_row),
+            )
+        except Exception:
+            restore_checkpoint_alias(
+                project_root,
+                alias=selected_alias,
+                expected_current=promoted,
+                previous=previous,
+            )
+            raise
 
 
 def _validated_phase5_runs(project_root: Path) -> list[tuple[str, Path, Any]]:

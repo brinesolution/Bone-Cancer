@@ -36,7 +36,7 @@ Phase 3 produced corrected manifest-only fit/calibration/validation/test assignm
 
 ## 8. Preprocessing
 
-`decode_radiograph` applies stored EXIF orientation in memory, converts grayscale/RGB/RGBA sources to grayscale-replicated RGB, and never rewrites originals. `resize_and_pad` uses one scale factor, central black padding and 384×384 output; masks use the same geometry with nearest-neighbour interpolation. `RadiographTransform` applies ImageNet normalization. A 16-image optional cache smoke test wrote deterministic opaque PNGs with source/cache hashes and a configuration fingerprint. The DataLoader reads source paths from manifests; cache use is not silently enabled.
+`decode_radiograph` applies stored EXIF orientation in memory and never rewrites originals. The versioned cache contains 6,324 verified 384×384 PNGs for fit_train (4,871) and validation (1,453). Source/cache SHA-256 and preprocessing fingerprints are checked at setup; random fit augmentation and ImageNet normalization remain dynamic after cache loading. Calibration and test are not cached.
 
 ## 9. Data Augmentation
 
@@ -104,7 +104,7 @@ The shared trainer uses AdamW, cosine scheduling, warmup, AMP, gradient clipping
 
 ## 24. Checkpointing
 
-Each immutable run records resolved config, environment, Git state, history, `best.pt`, `last.pt`, predictions and metrics. Checkpoints validate model/config identity before mutation and support exact resume. The selected Phase 7 artifact is Stage D epoch 6 (validation AUROC 0.958355); fresh reload reproduced logits, targets and IDs exactly. Test evaluation remains reserved for Phase 9.
+Each immutable run records config, environment, history, `best.pt`, `last.pt`, predictions and metrics. A checksum-backed registry promotes selected checkpoints under stable aliases for the four baselines and HOSP-BoneNet. Exact completed runs are reused; interrupted HOSP runs resume; only `--force-new-run` retrains. The selected Phase 7 artifact remains Stage D epoch 6 (validation AUROC 0.958355). Test evaluation remains reserved for Phase 9.
 
 ## 25. Evaluation Metrics
 

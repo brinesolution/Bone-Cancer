@@ -7,6 +7,7 @@ import importlib.util
 import json
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 import pandas as pd
@@ -238,6 +239,25 @@ def test_default_config_is_a_cuda_amp_pretrained_full_run(tmp_path: Path) -> Non
     assert resolved["limit_batches"] is None
     assert resolved["epochs"] == 40
     assert resolved["smoke_overrides"] == {}
+
+
+def test_operational_cache_config_does_not_change_baseline_run_identity(tmp_path: Path) -> None:
+    config = _project_config(tmp_path)
+    before = baseline_cli.resolve_config(config)
+    data_path = config.parent / "data.yaml"
+    data = yaml.safe_load(data_path.read_text(encoding="utf-8"))
+    data["cache"] = {
+        "enabled": True,
+        "root": "workspace/cache/resized",
+        "index_path": "workspace/cache/resized/cache_index.csv",
+        "required_splits": ["fit_train", "val"],
+    }
+    _write_yaml(data_path, data)
+
+    after = baseline_cli.resolve_config(config)
+
+    assert after["record"] == before["record"]
+    assert after["runtime"]["data"]["cache"] == data["cache"]
 
 
 def test_convnext_measured_memory_exception_preserves_effective_batch(tmp_path: Path) -> None:
@@ -741,6 +761,128 @@ def test_summary_publication_failure_rolls_back_selected_alias(
         resolve_checkpoint(project_root, "baseline.densenet121.phase5.selected")
         == alias_before
     )
+
+
+def test_concurrent_cross_model_publications_cannot_lose_summary_updates(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    calls: list[str] = []
+    first_registered = threading.Event()
+    release_first = threading.Event()
+    second_registered = threading.Event()
+
+    def register(run_dir: Path, *args: object, **kwargs: object) -> tuple[str, None]:
+        del args, kwargs
+        tag = run_dir.name
+        calls.append(f"register:{tag}")
+        if tag == "x":
+            first_registered.set()
+            assert release_first.wait(timeout=5)
+        else:
+            second_registered.set()
+        return tag, None
+
+    def update(path: Path, row: dict[str, object]) -> None:
+        del path
+        calls.append(f"summary:{row['tag']}")
+
+    monkeypatch.setattr(baseline_cli, "_register_baseline_checkpoint", register)
+    monkeypatch.setattr(report_module, "update_baseline_summary", update)
+    errors: list[Exception] = []
+
+    def publish(tag: str) -> None:
+        try:
+            model = "densenet121" if tag == "x" else "swin_tiny"
+            baseline_cli._publish_baseline_selection(
+                tmp_path / tag,
+                {"model": model},
+                {"tag": tag},
+                project_root=tmp_path,
+                replace_alias=True,
+            )
+        except Exception as error:
+            errors.append(error)
+
+    first = threading.Thread(target=publish, args=("x",))
+    second = threading.Thread(target=publish, args=("y",))
+    first.start()
+    assert first_registered.wait(timeout=5)
+    second.start()
+    assert not second_registered.wait(timeout=0.1)
+    release_first.set()
+    first.join(timeout=5)
+    second.join(timeout=5)
+
+    assert errors == []
+    assert calls == ["register:x", "summary:x", "register:y", "summary:y"]
+
+
+def test_failed_concurrent_publication_rolls_back_before_next_writer(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from bone_cancer_ai.artifacts import registry as registry_module
+
+    calls: list[str] = []
+    first_summary = threading.Event()
+    release_failure = threading.Event()
+    second_registered = threading.Event()
+
+    def register(run_dir: Path, *args: object, **kwargs: object) -> tuple[str, str]:
+        del args, kwargs
+        tag = run_dir.name
+        calls.append(f"register:{tag}")
+        if tag == "y":
+            second_registered.set()
+        return f"promoted-{tag}", f"previous-{tag}"
+
+    def update(path: Path, row: dict[str, object]) -> None:
+        del path
+        tag = str(row["tag"])
+        calls.append(f"summary:{tag}")
+        if tag == "x":
+            first_summary.set()
+            assert release_failure.wait(timeout=5)
+            raise OSError("synthetic publication failure")
+
+    def restore(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        calls.append("rollback:x")
+
+    monkeypatch.setattr(baseline_cli, "_register_baseline_checkpoint", register)
+    monkeypatch.setattr(report_module, "update_baseline_summary", update)
+    monkeypatch.setattr(registry_module, "restore_checkpoint_alias", restore)
+    errors: list[tuple[str, Exception]] = []
+
+    def publish(tag: str) -> None:
+        try:
+            baseline_cli._publish_baseline_selection(
+                tmp_path / tag,
+                {"model": "densenet121"},
+                {"tag": tag},
+                project_root=tmp_path,
+                replace_alias=True,
+            )
+        except Exception as error:
+            errors.append((tag, error))
+
+    first = threading.Thread(target=publish, args=("x",))
+    second = threading.Thread(target=publish, args=("y",))
+    first.start()
+    assert first_summary.wait(timeout=5)
+    second.start()
+    assert not second_registered.wait(timeout=0.1)
+    release_failure.set()
+    first.join(timeout=5)
+    second.join(timeout=5)
+
+    assert len(errors) == 1 and errors[0][0] == "x"
+    assert calls == [
+        "register:x",
+        "summary:x",
+        "rollback:x",
+        "register:y",
+        "summary:y",
+    ]
 
 
 def test_tampered_exact_completed_run_fails_closed_without_training(tmp_path: Path) -> None:
