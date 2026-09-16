@@ -4,7 +4,7 @@
 Configuration contracts.
 
 ## Files
-`data.yaml` owns immutable paths and data policy. `train.yaml` and `baseline_*.yaml` define the shared Phase 5 runs. `hosp_bonenet.yaml` defines the verified Phase 6 architecture and binary-only supervision gate. `inference.yaml` remains phase-gated.
+`data.yaml` owns immutable paths and data policy. `train.yaml` and `baseline_*.yaml` define the shared Phase 5 runs. `hosp_bonenet.yaml` defines the verified Phase 6 architecture and binary-only supervision gate. `inference.yaml` points to the verified Phase 7 HOSP alias while Phase 9 evaluation and Phase 10 inference remain gated.
 
 ## Inputs
 Approved directive, Phase 2 verified label meanings/duplicate evidence, and Phase 3 safety decisions.

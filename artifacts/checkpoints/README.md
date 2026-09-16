@@ -25,7 +25,9 @@ Alias replacement is explicit, requires the same model family and phase, and ret
 content-addressed checkpoint files.
 
 ## Execution
-Later training phases register selected checkpoints through the shared API.
+Phase 5/7 training registers selected checkpoints through the shared API. Run
+`python tools/refresh_checkpoint_registry.py` to revalidate existing selections and
+rebuild all five aliases without training.
 
 ## Notes
 Do not edit `registry.json` or generated weights manually. Git tracks registry metadata, never large checkpoints.

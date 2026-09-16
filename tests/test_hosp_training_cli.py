@@ -538,6 +538,27 @@ def test_exact_completed_run_is_validated_registered_and_reused_without_clean_gi
     assert record.selected_metric == {"split": "val", "name": "AUROC", "value": 1.0}
 
 
+def test_registry_refresh_registers_the_validated_phase7_selection(tmp_path: Path) -> None:
+    from bone_cancer_ai.artifacts.registry import resolve_checkpoint
+
+    config = _project_config(tmp_path)
+    project_root = config.parents[1]
+    run = hosp_cli.run_hosp_training(config, dependencies=_fake_dependencies([]))
+    (project_root / "artifacts" / "checkpoints" / "registry.json").unlink()
+
+    result = hosp_cli.refresh_phase7_registry(project_root)
+
+    assert result == {
+        "alias": "hosp_bonenet.phase7.selected",
+        "run": run.relative_to(project_root).as_posix(),
+        "status": "valid",
+    }
+    selected = resolve_checkpoint(project_root, "hosp_bonenet.phase7.selected")
+    assert selected.model_family == "hosp_bonenet"
+    assert selected.phase == "phase_7"
+    assert selected.source_run == run.relative_to(project_root).as_posix()
+
+
 def test_exact_completed_run_must_pass_bundle_validation_before_reuse(tmp_path: Path) -> None:
     config = _project_config(tmp_path)
     run = hosp_cli.run_hosp_training(config, dependencies=_fake_dependencies([]))

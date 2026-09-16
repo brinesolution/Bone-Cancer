@@ -1,28 +1,31 @@
 # tools
 
 ## Purpose
-Local annotation tools.
+Local annotation and verified-artifact maintenance tools.
 
 ## Files
-annotation_app/: inactive Phase 4 app/storage/validator modules.
+`annotation_app/`: Phase 4 app/storage/validator modules.
+`refresh_checkpoint_registry.py`: validates existing Phase 5/7 selections and rebuilds
+their five stable checkpoint aliases without training.
 
 ## Inputs
-Future images and reviewed annotation schema.
+Reviewed annotation state and completed, validated training bundles.
 
 ## Outputs
-No annotations created in Phase 1.
+Checkpoint registry metadata and local content-addressed checkpoint links.
 
 ## Main Libraries
-None in Phase 1.
+Python standard library plus the Phase 5/7 validators and artifact registry.
 
 ## Important Functions / Classes
-All tool logic is Pending Phase 4.
+`refresh_checkpoint_registry` composes the baseline and HOSP validation/registration APIs.
 
 ## Theory
 Annotation tools must preserve unknown labels and reviewer history.
 
 ## Execution
-Pending Phase 4.
+Run `python tools/refresh_checkpoint_registry.py` to validate and register all selected
+Phase 5/7 checkpoints without loading training data or starting training.
 
 ## Notes
 Do not edit generated records manually. Keep original dataset files untouched. Future-phase scaffolds are not completed functionality; update this README when implementation becomes active.

@@ -468,6 +468,21 @@ def _strict_equal(actual: object, expected: object) -> bool:
     return actual == expected
 
 
+def _configuration_fingerprint(record: Mapping[str, Any]) -> str:
+    serialized = json.dumps(
+        record,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    ).encode("utf-8")
+    return hashlib.sha256(serialized).hexdigest()
+
+
+def _selected_checkpoint_alias(model: str) -> str:
+    return f"baseline.{model}.phase5.selected"
+
+
 def _validate_schema_semantics(schema: Mapping[str, Any]) -> None:
     binary = schema.get("binary")
     if not isinstance(binary, Mapping) or not (
@@ -935,6 +950,7 @@ def run_baseline(
     pretrained_override: bool | None = None,
     limit_batches: int | None = None,
     dependencies: RunDependencies | None = None,
+    force_new_run: bool = False,
 ) -> Path:
     """Execute one immutable train/validate/test baseline run."""
 
@@ -946,6 +962,25 @@ def run_baseline(
     )
     record = resolved["record"]
     runtime = resolved["runtime"]
+    if type(force_new_run) is not bool:
+        raise ValueError("force_new_run must be a boolean")
+    project_root = Path(runtime["project_root"])
+    if record["run_type"] == "final" and not force_new_run:
+        reusable = _find_exact_completed_run(
+            Path(runtime["output_root"]), record, project_root
+        )
+        if reusable is not None:
+            summary_row = _baseline_summary_row(
+                project_root, str(record["model"]), int(record["seed"])
+            )
+            _validate_run_bundle(reusable, str(record["model"]), summary_row)
+            _register_baseline_checkpoint(
+                reusable,
+                record,
+                project_root=project_root,
+                replace_alias=False,
+            )
+            return reusable
     dependencies = dependencies or _default_dependencies()
     if not dependencies.cuda_available():
         raise RuntimeError("CUDA is required for Phase 5 baseline training and is unavailable")
@@ -960,7 +995,6 @@ def run_baseline(
         update_baseline_summary,
     )
 
-    project_root = Path(runtime["project_root"])
     run_dir = _new_run_directory(Path(runtime["output_root"]), str(record["model"]))
     notes_path = run_dir / "notes.md"
     failure_note_snapshot = json.loads(json.dumps(record))
@@ -1077,6 +1111,13 @@ def run_baseline(
         ):
             update_baseline_summary(
                 project_root / "artifacts" / "metrics" / "baseline_summary.csv", summary_row
+            )
+            _validate_run_bundle(run_dir, str(record["model"]), summary_row)
+            _register_baseline_checkpoint(
+                run_dir,
+                record,
+                project_root=project_root,
+                replace_alias=force_new_run,
             )
         return run_dir
     except torch.cuda.OutOfMemoryError as error:
@@ -1253,9 +1294,88 @@ def _validate_run_bundle(run_dir: Path, alias: str, summary_row: Any) -> None:
             raise ValueError(f"summary {column} does not match run {run_dir.name}")
 
 
-def validate_phase5_artifacts(project_root: Path = PROJECT_ROOT) -> dict[str, object]:
-    """Validate four final baseline summaries and their latest complete bundles."""
+def _baseline_summary_row(project_root: Path, alias: str, seed: int) -> Any:
+    import pandas as pd
 
+    summary_path = project_root / "artifacts" / "metrics" / "baseline_summary.csv"
+    if not summary_path.is_file():
+        raise ValueError(f"baseline summary is missing for exact completed run {alias}")
+    summary = pd.read_csv(summary_path)
+    if summary.columns.tolist() != BASELINE_SUMMARY_COLUMNS:
+        raise ValueError("baseline summary schema is invalid")
+    matches = summary.loc[(summary["model"] == alias) & (summary["seed"] == seed)]
+    if len(matches) != 1:
+        raise ValueError(f"baseline summary must contain exactly one row for {alias} seed {seed}")
+    return matches.iloc[0]
+
+
+def _find_exact_completed_run(
+    output_root: Path, record: Mapping[str, Any], project_root: Path
+) -> Path | None:
+    model_root = output_root / str(record["model"])
+    if not model_root.is_dir():
+        return None
+    for run_dir in sorted(
+        (path for path in model_root.iterdir() if path.is_dir()), reverse=True
+    ):
+        try:
+            persisted = _load_yaml(run_dir / "config.yaml", name="resolved run config")
+        except (OSError, ValueError):
+            continue
+        if not _strict_equal(persisted, record):
+            continue
+        if _complete_final_candidate(
+            run_dir, str(record["model"]), int(record["seed"]), project_root
+        ):
+            return run_dir
+        try:
+            status_lines = [
+                line
+                for line in (run_dir / "notes.md").read_text(encoding="utf-8").splitlines()
+                if line.startswith("Status:")
+            ]
+        except OSError:
+            status_lines = []
+        if (run_dir / "metrics.json").exists() or status_lines == ["Status: Complete"]:
+            raise ValueError(f"exact completed run {run_dir.name} is incomplete or tampered")
+    return None
+
+
+def _register_baseline_checkpoint(
+    run_dir: Path,
+    record: Mapping[str, Any],
+    *,
+    project_root: Path,
+    replace_alias: bool,
+) -> None:
+    from bone_cancer_ai.artifacts.registry import promote_checkpoint, resolve_checkpoint
+
+    metrics = _strict_json(run_dir / "metrics.json")
+    validation = metrics.get("validation") if isinstance(metrics, Mapping) else None
+    if not isinstance(validation, Mapping) or isinstance(validation.get("AUROC"), bool):
+        raise ValueError("baseline validation AUROC is missing")
+    selected_alias = _selected_checkpoint_alias(str(record["model"]))
+    promoted = promote_checkpoint(
+        project_root,
+        alias=selected_alias,
+        checkpoint_path=run_dir / "best.pt",
+        replace_alias=replace_alias,
+        model_family=str(record["model"]),
+        phase="phase_5",
+        source_run=run_dir,
+        selected_metric={
+            "split": "val",
+            "name": "AUROC",
+            "value": float(validation["AUROC"]),
+        },
+        configuration_fingerprint=_configuration_fingerprint(record),
+        test_status={"status": "complete", "phase": 5},
+    )
+    if resolve_checkpoint(project_root, selected_alias) != promoted:
+        raise ValueError(f"checkpoint alias {selected_alias!r} did not resolve after promotion")
+
+
+def _validated_phase5_runs(project_root: Path) -> list[tuple[str, Path, Any]]:
     root = Path(project_root).resolve()
     summary_path = root / "artifacts" / "metrics" / "baseline_summary.csv"
     if not summary_path.is_file():
@@ -1269,6 +1389,7 @@ def validate_phase5_artifacts(project_root: Path = PROJECT_ROOT) -> dict[str, ob
         raise ValueError("Phase 5 requires four approved model/seed summary rows")
     if summary[["model", "seed"]].duplicated().any() or not summary["seed"].eq(42).all():
         raise ValueError("Phase 5 requires four approved model/seed summary rows")
+    validated: list[tuple[str, Path, Any]] = []
     for _, row in summary.iterrows():
         alias = str(row["model"])
         model_root = root / "experiments" / "baselines" / alias
@@ -1285,7 +1406,32 @@ def validate_phase5_artifacts(project_root: Path = PROJECT_ROOT) -> dict[str, ob
         if not complete_final_runs:
             raise ValueError(f"no complete final run exists for {alias}")
         _validate_run_bundle(complete_final_runs[0], alias, row)
+        validated.append((alias, complete_final_runs[0], row))
+    return validated
+
+
+def validate_phase5_artifacts(project_root: Path = PROJECT_ROOT) -> dict[str, object]:
+    """Validate four final baseline summaries and their latest complete bundles."""
+
+    _validated_phase5_runs(project_root)
     return {"models": 4, "runs": 4, "status": "valid"}
+
+
+def refresh_phase5_registry(project_root: Path = PROJECT_ROOT) -> dict[str, object]:
+    """Validate and register all four selected Phase 5 checkpoints without training."""
+
+    root = Path(project_root).resolve()
+    aliases: list[str] = []
+    for model, run_dir, _ in _validated_phase5_runs(root):
+        record = _load_yaml(run_dir / "config.yaml", name="resolved run config")
+        _register_baseline_checkpoint(
+            run_dir,
+            record,
+            project_root=root,
+            replace_alias=False,
+        )
+        aliases.append(_selected_checkpoint_alias(model))
+    return {"aliases": sorted(aliases), "models": len(aliases), "status": "valid"}
 
 
 def _parse_bool(value: str) -> bool:
@@ -1303,6 +1449,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--epochs", type=int)
     parser.add_argument("--pretrained", type=_parse_bool)
     parser.add_argument("--limit-batches", type=int)
+    parser.add_argument("--force-new-run", action="store_true")
     parser.add_argument("--validate-artifacts", action="store_true")
     args = parser.parse_args(argv)
     if args.validate_artifacts:
@@ -1310,6 +1457,8 @@ def main(argv: list[str] | None = None) -> int:
             value is not None for value in (args.epochs, args.pretrained, args.limit_batches)
         ):
             parser.error("--validate-artifacts cannot be combined with training arguments")
+        if args.force_new_run:
+            parser.error("--validate-artifacts cannot be combined with --force-new-run")
         print(json.dumps(validate_phase5_artifacts(PROJECT_ROOT), indent=2))
         return 0
     if args.config is None:
@@ -1319,6 +1468,7 @@ def main(argv: list[str] | None = None) -> int:
         epochs_override=args.epochs,
         pretrained_override=args.pretrained,
         limit_batches=args.limit_batches,
+        force_new_run=args.force_new_run,
     )
     print(run_dir)
     return 0

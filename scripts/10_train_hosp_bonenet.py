@@ -829,6 +829,31 @@ def run_hosp_training(
         )
 
 
+def refresh_phase7_registry(project_root: Path = PROJECT_ROOT) -> dict[str, str]:
+    """Validate and register the selected Phase 7 checkpoint without training."""
+
+    root = Path(project_root).resolve()
+    resolved = resolve_config(root / "configs" / "hosp_bonenet.yaml")
+    record, runtime = resolved["record"], resolved["runtime"]
+    discovered = _discover_exact_run(Path(runtime["output_root"]), record)
+    if discovered is None or discovered[0] != "complete":
+        raise ValueError("no exact completed Phase 7 HOSP run is available")
+    run_dir = discovered[1]
+    selection = validate_run_bundle(run_dir)
+    _register_selected_checkpoint(
+        run_dir,
+        record,
+        selection,
+        project_root=root,
+        replace_alias=False,
+    )
+    return {
+        "alias": SELECTED_CHECKPOINT_ALIAS,
+        "run": run_dir.relative_to(root).as_posix(),
+        "status": "valid",
+    }
+
+
 def _execute_hosp_training(
     *,
     record: Mapping[str, Any],

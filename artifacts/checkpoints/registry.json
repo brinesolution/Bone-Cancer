@@ -1,0 +1,92 @@
+{
+  "baseline.convnext_tiny.phase5.selected": {
+    "alias": "baseline.convnext_tiny.phase5.selected",
+    "checkpoint_path": "artifacts/checkpoints/5e8c19a1e6d1b0ab7b8e29e1fa472eac8fef50e7db2827bf856a4a37b19278cd.pt",
+    "checkpoint_sha256": "5e8c19a1e6d1b0ab7b8e29e1fa472eac8fef50e7db2827bf856a4a37b19278cd",
+    "configuration_fingerprint": "5f5d3e8271d64ca97f6b28c5c80d49a1effb4c87129bc53694f398420bc46ad2",
+    "model_family": "convnext_tiny",
+    "phase": "phase_5",
+    "selected_metric": {
+      "name": "AUROC",
+      "split": "val",
+      "value": 0.9558336271376634
+    },
+    "source_run": "experiments/baselines/convnext_tiny/20260911T150346748828Z-840945d2",
+    "test_status": {
+      "phase": 5,
+      "status": "complete"
+    }
+  },
+  "baseline.densenet121.phase5.selected": {
+    "alias": "baseline.densenet121.phase5.selected",
+    "checkpoint_path": "artifacts/checkpoints/2d24182a558f5d95b72e6c1328b30afe31b34ca28f76aab0143c229c411f835e.pt",
+    "checkpoint_sha256": "2d24182a558f5d95b72e6c1328b30afe31b34ca28f76aab0143c229c411f835e",
+    "configuration_fingerprint": "e5183bcea7cfafdb86d2833fe2a680e2eda9b94de6704b16be8d23631d4121fb",
+    "model_family": "densenet121",
+    "phase": "phase_5",
+    "selected_metric": {
+      "name": "AUROC",
+      "split": "val",
+      "value": 0.9633000481459999
+    },
+    "source_run": "experiments/baselines/densenet121/20260910T201824489363Z-8b08661d",
+    "test_status": {
+      "phase": 5,
+      "status": "complete"
+    }
+  },
+  "baseline.efficientnet_b3.phase5.selected": {
+    "alias": "baseline.efficientnet_b3.phase5.selected",
+    "checkpoint_path": "artifacts/checkpoints/f9f9a1623c2f27c2784c1cbbe42850d0ac2a711e89608e8e4baf096e2ff586a5.pt",
+    "checkpoint_sha256": "f9f9a1623c2f27c2784c1cbbe42850d0ac2a711e89608e8e4baf096e2ff586a5",
+    "configuration_fingerprint": "3d90a87e6abeb3dc8d5b047a754f0cd7d4a999bf9b7cbe3809f76118ce703d39",
+    "model_family": "efficientnet_b3",
+    "phase": "phase_5",
+    "selected_metric": {
+      "name": "AUROC",
+      "split": "val",
+      "value": 0.9718781868292259
+    },
+    "source_run": "experiments/baselines/efficientnet_b3/20260911T035833073159Z-4d5b4f29",
+    "test_status": {
+      "phase": 5,
+      "status": "complete"
+    }
+  },
+  "baseline.swin_tiny.phase5.selected": {
+    "alias": "baseline.swin_tiny.phase5.selected",
+    "checkpoint_path": "artifacts/checkpoints/bda055d1d6b012f4ea71b523e8dbb88f8df77c2697242769ffbe292bf83c5540.pt",
+    "checkpoint_sha256": "bda055d1d6b012f4ea71b523e8dbb88f8df77c2697242769ffbe292bf83c5540",
+    "configuration_fingerprint": "bf564c5dd9e8fbbe252811cea0c2f249d3dd621d6f9832845c8bbc264ab37dbd",
+    "model_family": "swin_tiny",
+    "phase": "phase_5",
+    "selected_metric": {
+      "name": "AUROC",
+      "split": "val",
+      "value": 0.955564464461049
+    },
+    "source_run": "experiments/baselines/swin_tiny/20260911T175501792702Z-21542b12",
+    "test_status": {
+      "phase": 5,
+      "status": "complete"
+    }
+  },
+  "hosp_bonenet.phase7.selected": {
+    "alias": "hosp_bonenet.phase7.selected",
+    "checkpoint_path": "artifacts/checkpoints/a6380739e6527a085434866c83a135b86ca118e82f8d5a8bf75d934d25ce268e.pt",
+    "checkpoint_sha256": "a6380739e6527a085434866c83a135b86ca118e82f8d5a8bf75d934d25ce268e",
+    "configuration_fingerprint": "5a60b016dbfb3f3a64873d1d439a6fbf214852715d0504111d8bf22a519eb593",
+    "model_family": "hosp_bonenet",
+    "phase": "phase_7",
+    "selected_metric": {
+      "name": "AUROC",
+      "split": "val",
+      "value": 0.9583546578411638
+    },
+    "source_run": "experiments/hosp_bonenet/20260912T121852779982Z-a371f643",
+    "test_status": {
+      "planned_phase": 9,
+      "status": "not_run"
+    }
+  }
+}

@@ -561,7 +561,9 @@ def test_successful_runs_are_unique_complete_and_never_use_test_for_selection(
     dependencies = _fake_dependencies(events)
 
     first = baseline_cli.run_baseline(config, dependencies=dependencies)
-    second = baseline_cli.run_baseline(config, dependencies=dependencies)
+    second = baseline_cli.run_baseline(
+        config, dependencies=dependencies, force_new_run=True
+    )
 
     assert first != second
     assert first.parent == second.parent
@@ -600,6 +602,113 @@ def test_successful_runs_are_unique_complete_and_never_use_test_for_selection(
     assert summary.iloc[0]["AUROC"] == pytest.approx(0.9)
     predictions = pd.read_csv(first / "test_predictions.csv")
     assert predictions["logit"].tolist() == [-4.0, 4.0]
+
+
+def test_exact_completed_final_run_is_validated_registered_and_reused_before_cuda(
+    tmp_path: Path,
+) -> None:
+    from bone_cancer_ai.artifacts.registry import resolve_checkpoint
+
+    config = _project_config(tmp_path)
+    project_root = config.parents[1]
+    run = baseline_cli.run_baseline(config, dependencies=_fake_dependencies([]))
+    unavailable = _fake_dependencies([])
+
+    def reject_cuda_check() -> bool:
+        raise AssertionError("completed baseline reuse must happen before CUDA setup")
+
+    unavailable.cuda_available = reject_cuda_check
+    reused = baseline_cli.run_baseline(config, dependencies=unavailable)
+
+    assert reused == run
+    selected = resolve_checkpoint(project_root, "baseline.densenet121.phase5.selected")
+    assert selected.model_family == "densenet121"
+    assert selected.phase == "phase_5"
+    assert selected.source_run == run.relative_to(project_root).as_posix()
+    assert selected.selected_metric == {"split": "val", "name": "AUROC", "value": 0.8}
+    assert selected.test_status == {"status": "complete", "phase": 5}
+
+
+def test_force_new_run_retrains_and_replaces_its_selected_baseline_alias(
+    tmp_path: Path,
+) -> None:
+    from bone_cancer_ai.artifacts.registry import resolve_checkpoint
+
+    config = _project_config(tmp_path)
+    project_root = config.parents[1]
+    first = baseline_cli.run_baseline(config, dependencies=_fake_dependencies([]))
+
+    second = baseline_cli.run_baseline(
+        config,
+        dependencies=_fake_dependencies([]),
+        force_new_run=True,
+    )
+
+    assert second != first
+    selected = resolve_checkpoint(project_root, "baseline.densenet121.phase5.selected")
+    assert selected.source_run == second.relative_to(project_root).as_posix()
+
+
+def test_tampered_exact_completed_run_fails_closed_without_training(tmp_path: Path) -> None:
+    config = _project_config(tmp_path)
+    run = baseline_cli.run_baseline(config, dependencies=_fake_dependencies([]))
+    with (run / "best.pt").open("ab") as checkpoint:
+        checkpoint.write(b"tampered")
+    unavailable = _fake_dependencies([])
+
+    def reject_cuda_check() -> bool:
+        raise AssertionError("tampered exact run must fail before training")
+
+    unavailable.cuda_available = reject_cuda_check
+    with pytest.raises(ValueError, match="checksum"):
+        baseline_cli.run_baseline(config, dependencies=unavailable)
+
+    assert [path for path in run.parent.iterdir() if path.is_dir()] == [run]
+
+
+def test_newer_failed_exact_attempt_does_not_hide_completed_reuse(tmp_path: Path) -> None:
+    config = _project_config(tmp_path)
+    completed = baseline_cli.run_baseline(config, dependencies=_fake_dependencies([]))
+    failing = _fake_dependencies([])
+
+    class FailingTrainer(_FakeTrainer):
+        def fit(self, train_loader, val_loader):
+            del train_loader, val_loader
+            raise RuntimeError("synthetic failure")
+
+    failing.trainer_type = FailingTrainer
+    with pytest.raises(RuntimeError, match="synthetic failure"):
+        baseline_cli.run_baseline(config, dependencies=failing, force_new_run=True)
+
+    unavailable = _fake_dependencies([])
+
+    def reject_cuda_check() -> bool:
+        raise AssertionError("completed reuse must precede CUDA")
+
+    unavailable.cuda_available = reject_cuda_check
+    assert baseline_cli.run_baseline(config, dependencies=unavailable) == completed
+
+
+def test_cli_forwards_force_new_run(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    config = _project_config(tmp_path)
+    calls: list[dict[str, object]] = []
+
+    def capture(path: Path, **kwargs: object) -> Path:
+        assert path == config
+        calls.append(kwargs)
+        return tmp_path / "new-run"
+
+    monkeypatch.setattr(baseline_cli, "run_baseline", capture)
+
+    assert baseline_cli.main(["--config", str(config), "--force-new-run"]) == 0
+    assert calls == [
+        {
+            "epochs_override": None,
+            "pretrained_override": None,
+            "limit_batches": None,
+            "force_new_run": True,
+        }
+    ]
 
 
 def test_convnext_run_persists_measured_memory_exception_evidence(tmp_path: Path) -> None:
@@ -866,6 +975,16 @@ def test_smoke_run_is_recorded_only_in_its_bundle_not_the_final_summary(tmp_path
     }
     assert "Run type: smoke" in run.joinpath("notes.md").read_text(encoding="utf-8")
     assert not (config.parents[1] / "artifacts" / "metrics" / "baseline_summary.csv").exists()
+    assert not (config.parents[1] / "artifacts" / "checkpoints" / "registry.json").exists()
+
+    second = baseline_cli.run_baseline(
+        config,
+        epochs_override=1,
+        pretrained_override=False,
+        limit_batches=1,
+        dependencies=_fake_dependencies([]),
+    )
+    assert second != run
 
 
 @pytest.mark.parametrize(
@@ -1079,12 +1198,41 @@ def _four_final_runs(tmp_path: Path) -> tuple[Path, dict[str, Path]]:
     return first_config.parents[1], runs
 
 
+def test_registry_refresh_registers_all_four_validated_phase5_selections(
+    tmp_path: Path,
+) -> None:
+    from bone_cancer_ai.artifacts.registry import resolve_checkpoint
+
+    root, runs = _four_final_runs(tmp_path)
+    (root / "artifacts" / "checkpoints" / "registry.json").unlink()
+
+    result = baseline_cli.refresh_phase5_registry(root)
+
+    assert result == {
+        "aliases": [
+            "baseline.convnext_tiny.phase5.selected",
+            "baseline.densenet121.phase5.selected",
+            "baseline.efficientnet_b3.phase5.selected",
+            "baseline.swin_tiny.phase5.selected",
+        ],
+        "models": 4,
+        "status": "valid",
+    }
+    for model, run in runs.items():
+        selected = resolve_checkpoint(root, f"baseline.{model}.phase5.selected")
+        assert selected.model_family == model
+        assert selected.phase == "phase_5"
+        assert selected.source_run == run.relative_to(root).as_posix()
+
+
 def test_validator_rejects_stale_summary_instead_of_matching_an_older_run(
     tmp_path: Path,
 ) -> None:
     root, runs = _four_final_runs(tmp_path)
     config = root / "configs" / "baseline_densenet121.yaml"
-    newer = baseline_cli.run_baseline(config, dependencies=_fake_dependencies([]))
+    newer = baseline_cli.run_baseline(
+        config, dependencies=_fake_dependencies([]), force_new_run=True
+    )
     assert newer.name > runs["densenet121"].name
     metrics = json.loads(newer.joinpath("metrics.json").read_text(encoding="utf-8"))
     metrics["test"]["AUROC"] = 0.123
