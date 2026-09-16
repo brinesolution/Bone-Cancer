@@ -532,7 +532,6 @@ def _discover_exact_run(
         return None
     completed: list[Path] = []
     failed: list[Path] = []
-    running: list[Path] = []
     for run_dir in sorted(
         (path for path in output_root.iterdir() if path.is_dir()),
         key=lambda path: path.name,
@@ -546,16 +545,12 @@ def _discover_exact_run(
             for stage_key in ("A", "D")
         ):
             failed.append(run_dir)
-        elif status == "running":
-            running.append(run_dir)
-        elif status is None:
+        elif status in {None, "running"}:
             continue
         elif status is not None:
             raise ValueError(f"run {run_dir.name} has unsupported status {status!r}")
     if completed:
         return "complete", completed[0]
-    if running:
-        return "running", running[0]
     if failed:
         return "failed", failed[0]
     return None
@@ -801,10 +796,6 @@ def run_hosp_training(
                 )
                 print(f"phase7_reuse run_id={discovered_run.name}", flush=True)
                 return discovered_run
-            if discovered_status == "running":
-                raise RuntimeError(
-                    f"exact HOSP run {discovered_run.name} is already running"
-                )
             selected_resume = discovered_run
     production_run = dependencies is None
     orchestration_commit = (
@@ -816,33 +807,26 @@ def run_hosp_training(
     if not dependencies.cuda_available():
         raise RuntimeError("Phase 7 HOSP training requires CUDA")
     validate_recorded_inputs(record, runtime)
-    if selected_resume is not None:
-        from bone_cancer_ai.utils.locking import exclusive_file_lock
+    from bone_cancer_ai.utils.locking import exclusive_file_lock
 
-        resume_candidate = Path(selected_resume).resolve()
-        if resume_candidate.parent != output_root.resolve() or not resume_candidate.is_dir():
+    if selected_resume is not None:
+        run_dir = Path(selected_resume).resolve()
+        if run_dir.parent != output_root.resolve() or not run_dir.is_dir():
             raise ValueError("resume run must be an existing direct child of HOSP output_root")
-        with exclusive_file_lock(resume_candidate / ".run.lock"):
-            return _execute_hosp_training(
-                record=record,
-                runtime=runtime,
-                project_root=project_root,
-                output_root=output_root,
-                dependencies=dependencies,
-                selected_resume=resume_candidate,
-                orchestration_commit=orchestration_commit,
-                force_new_run=force_new_run,
-            )
-    return _execute_hosp_training(
-        record=record,
-        runtime=runtime,
-        project_root=project_root,
-        output_root=output_root,
-        dependencies=dependencies,
-        selected_resume=None,
-        orchestration_commit=orchestration_commit,
-        force_new_run=force_new_run,
-    )
+    else:
+        run_dir = _new_run_directory(output_root)
+    with exclusive_file_lock(run_dir / ".run.lock"):
+        return _execute_hosp_training(
+            record=record,
+            runtime=runtime,
+            project_root=project_root,
+            output_root=output_root,
+            dependencies=dependencies,
+            run_dir=run_dir,
+            selected_resume=run_dir if selected_resume is not None else None,
+            orchestration_commit=orchestration_commit,
+            force_new_run=force_new_run,
+        )
 
 
 def _execute_hosp_training(
@@ -852,6 +836,7 @@ def _execute_hosp_training(
     project_root: Path,
     output_root: Path,
     dependencies: RunDependencies,
+    run_dir: Path,
     selected_resume: Path | None,
     orchestration_commit: str,
     force_new_run: bool,
@@ -861,9 +846,7 @@ def _execute_hosp_training(
     from bone_cancer_ai.evaluation.reports import atomic_write_csv, atomic_write_json
 
     prior_status: str | None = None
-    if selected_resume is None:
-        run_dir = _new_run_directory(output_root)
-    else:
+    if selected_resume is not None:
         run_dir, prior_status = _resume_directory(selected_resume, output_root, record)
     notes_path = run_dir / "notes.md"
     try:

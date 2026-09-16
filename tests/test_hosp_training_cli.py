@@ -377,6 +377,22 @@ def _fake_dependencies(events: list[Any]):
     )
 
 
+def _blocking_dependencies(
+    events: list[Any], entered: threading.Event, release: threading.Event
+) -> Any:
+    dependencies = _fake_dependencies(events)
+
+    class BlockingDataModule(_FakeDataModule):
+        def setup(self) -> None:
+            super().setup()
+            entered.set()
+            if not release.wait(timeout=5):
+                raise TimeoutError("test did not release initial training")
+
+    dependencies.data_module_type = BlockingDataModule
+    return dependencies
+
+
 def test_run_is_two_stage_val_only_and_reloads_selected_checkpoint_exactly(
     tmp_path: Path,
 ) -> None:
@@ -602,7 +618,44 @@ def test_discovery_requires_strict_persisted_config_equality(tmp_path: Path) -> 
     assert hosp_cli._matching_run_status(run, record) is None
 
 
-def test_exact_running_run_blocks_automatic_resume_and_new_allocation(tmp_path: Path) -> None:
+def test_running_candidate_does_not_shadow_an_exact_failed_resume(tmp_path: Path) -> None:
+    config = _project_config(tmp_path)
+    failed = hosp_cli.run_hosp_training(config, dependencies=_fake_dependencies([]))
+    shutil.rmtree(failed / "stage_D")
+    for name in ("selection.json", "metrics.json", "best_checkpoint_path.txt"):
+        (failed / name).unlink()
+    (failed / "status.json").write_text(
+        json.dumps({"status": "failed", "test": "not_run", "planned_phase": 9}),
+        encoding="utf-8",
+    )
+    resolved = hosp_cli.resolve_config(config)
+    running = Path(resolved["runtime"]["output_root"]) / "running-candidate"
+    (running / "stage_A").mkdir(parents=True)
+    (running / "config.yaml").write_text(
+        yaml.safe_dump(resolved["record"], sort_keys=False), encoding="utf-8"
+    )
+    (running / "status.json").write_text(
+        json.dumps({"status": "running", "test": "not_run", "planned_phase": 9}),
+        encoding="utf-8",
+    )
+    (running / "stage_A" / "last.pt").write_bytes(b"active checkpoint")
+    running_before = {
+        path.relative_to(running).as_posix(): path.read_bytes()
+        for path in running.rglob("*")
+        if path.is_file()
+    }
+
+    resumed = hosp_cli.run_hosp_training(config, dependencies=_fake_dependencies([]))
+
+    assert resumed == failed
+    assert {
+        path.relative_to(running).as_posix(): path.read_bytes()
+        for path in running.rglob("*")
+        if path.is_file()
+    } == running_before
+
+
+def test_running_only_candidate_is_ignored_when_allocating_a_fresh_run(tmp_path: Path) -> None:
     config = _project_config(tmp_path)
     resolved = hosp_cli.resolve_config(config)
     record = resolved["record"]
@@ -615,10 +668,39 @@ def test_exact_running_run_blocks_automatic_resume_and_new_allocation(tmp_path: 
     (run / "status.json").write_text(json.dumps({"status": "running"}), encoding="utf-8")
     (run / "stage_A" / "last.pt").write_bytes(b"active checkpoint")
 
-    with pytest.raises(RuntimeError, match="already running"):
-        hosp_cli.run_hosp_training(config, dependencies=_fake_dependencies([]))
+    fresh = hosp_cli.run_hosp_training(config, dependencies=_fake_dependencies([]))
 
-    assert [path.name for path in output_root.iterdir() if path.is_dir()] == ["candidate"]
+    assert fresh != run
+    assert fresh.parent == output_root
+    assert json.loads((run / "status.json").read_text(encoding="utf-8")) == {
+        "status": "running"
+    }
+
+
+def test_explicit_resume_reclaims_a_stale_running_run_when_its_lock_is_free(
+    tmp_path: Path,
+) -> None:
+    config = _project_config(tmp_path)
+    run = hosp_cli.run_hosp_training(config, dependencies=_fake_dependencies([]))
+    shutil.rmtree(run / "stage_D")
+    for name in ("selection.json", "metrics.json", "best_checkpoint_path.txt"):
+        (run / name).unlink()
+    (run / "status.json").write_text(
+        json.dumps({"status": "running", "test": "not_run", "planned_phase": 9}),
+        encoding="utf-8",
+    )
+
+    resumed = hosp_cli.run_hosp_training(
+        config,
+        dependencies=_fake_dependencies([]),
+        resume_run=run,
+    )
+
+    assert resumed == run
+    assert json.loads((run / "status.json").read_text(encoding="utf-8"))["status"] == (
+        "complete"
+    )
+    assert (run / "resume_provenance.txt").is_file()
 
 
 def test_cli_rejects_force_new_run_with_explicit_resume(
@@ -686,6 +768,71 @@ def test_resume_lock_contention_fails_without_mutating_run_artifacts(
     assert not holder.is_alive()
     assert holder_errors == []
     assert after == before
+
+
+@pytest.mark.parametrize("force_new_run", [False, True])
+def test_initial_execution_holds_run_lock_against_explicit_resume(
+    tmp_path: Path, force_new_run: bool
+) -> None:
+    config = _project_config(tmp_path)
+    if force_new_run:
+        hosp_cli.run_hosp_training(config, dependencies=_fake_dependencies([]))
+    entered = threading.Event()
+    release = threading.Event()
+    initial_errors: list[BaseException] = []
+
+    def run_initial() -> None:
+        try:
+            hosp_cli.run_hosp_training(
+                config,
+                dependencies=_blocking_dependencies([], entered, release),
+                force_new_run=force_new_run,
+            )
+        except BaseException as error:
+            initial_errors.append(error)
+
+    initial = threading.Thread(target=run_initial)
+    initial.start()
+    assert entered.wait(timeout=5)
+    output_root = config.parents[1] / "experiments" / "hosp_bonenet"
+    running_runs = [
+        path
+        for path in output_root.iterdir()
+        if path.is_dir()
+        and json.loads((path / "status.json").read_text(encoding="utf-8"))["status"]
+        == "running"
+    ]
+    assert len(running_runs) == 1
+    running = running_runs[0]
+    before = {
+        path.relative_to(running).as_posix(): path.read_bytes()
+        for path in running.rglob("*")
+        if path.is_file() and path.name != ".run.lock"
+    }
+    contender_error: BaseException | None = None
+    try:
+        try:
+            hosp_cli.run_hosp_training(
+                config,
+                dependencies=_fake_dependencies([]),
+                resume_run=running,
+            )
+        except BaseException as error:
+            contender_error = error
+        after = {
+            path.relative_to(running).as_posix(): path.read_bytes()
+            for path in running.rglob("*")
+            if path.is_file() and path.name != ".run.lock"
+        }
+    finally:
+        release.set()
+        initial.join(timeout=5)
+
+    assert isinstance(contender_error, TimeoutError)
+    assert "already locked" in str(contender_error)
+    assert after == before
+    assert not initial.is_alive()
+    assert initial_errors == []
 
 
 def test_failed_run_with_last_only_checkpoint_is_automatically_recoverable(
