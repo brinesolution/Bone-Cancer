@@ -8,6 +8,7 @@ from typing import Any, Protocol
 
 import torch
 from torch import nn
+from torch.nn import functional as F
 
 from .concept_head import ConceptHead
 from .encoder import TimmFeatureEncoder
@@ -38,6 +39,7 @@ class HOSPConfig:
     dropout: float = 0.2
     pooling: str = "adaptive_avg"
     localization_enabled: bool = True
+    spatial_path: str = "auto"
     subtype_enabled: bool = False
     num_subtypes: int = 0
     risk_enabled: bool = False
@@ -56,6 +58,12 @@ class HOSPConfig:
             raise ValueError("dropout must be in [0, 1)")
         if self.pooling not in {"adaptive_avg", "avg", "average", "gem"}:
             raise ValueError("pooling must be 'adaptive_avg' or 'gem'")
+        if self.spatial_path not in {"auto", "none", "attention", "gated"}:
+            raise ValueError("spatial_path must be auto, none, attention, or gated")
+        if not self.localization_enabled and self.spatial_path in {"attention", "gated"}:
+            raise ValueError("spatial_path requires the localization branch")
+        if self.localization_enabled and self.spatial_path == "none":
+            raise ValueError("spatial_path none cannot enable the localization branch")
         if self.subtype_enabled and self.num_subtypes < 2:
             raise ValueError("num_subtypes must be at least 2 when subtype is enabled")
         if self.risk_enabled and self.num_risk_classes < 2:
@@ -83,6 +91,9 @@ class HOSPBoneNet(nn.Module):
     def __init__(self, config: HOSPConfig, encoder: nn.Module | None = None) -> None:
         super().__init__()
         self.config = config
+        self.spatial_path = (
+            "gated" if config.localization_enabled else "none"
+        ) if config.spatial_path == "auto" else config.spatial_path
         self.encoder = encoder or TimmFeatureEncoder(config.backbone, config.pretrained)
         channels = tuple(int(value) for value in self.encoder.feature_channels)
         reductions = tuple(int(value) for value in self.encoder.feature_reductions)
@@ -98,8 +109,8 @@ class HOSPBoneNet(nn.Module):
             if config.localization_enabled
             else None
         )
-        self.local_pool = MaskWeightedPool() if config.localization_enabled else None
-        self.fusion = GatedFusion(config.feature_dim) if config.localization_enabled else None
+        self.local_pool = MaskWeightedPool() if self.spatial_path == "gated" else None
+        self.fusion = GatedFusion(config.feature_dim) if self.spatial_path == "gated" else None
         self.concept_head = (
             ConceptHead(config.feature_dim, config.num_concepts)
             if config.concepts_enabled
@@ -138,11 +149,20 @@ class HOSPBoneNet(nn.Module):
         base_features = global_features
         if self.localization_head is not None:
             lesion_logits = self.localization_head(features, images.shape[-2:])
-            assert self.local_pool is not None and self.fusion is not None
-            local_features = self.local_pool(deepest, lesion_logits)
-            base_features = self.fusion(global_features, local_features)
             output["lesion_logits"] = lesion_logits
-            output["local_features"] = local_features
+            if self.spatial_path == "attention":
+                attention = F.interpolate(
+                    lesion_logits.sigmoid(),
+                    size=deepest.shape[-2:],
+                    mode="bilinear",
+                    align_corners=False,
+                )
+                base_features = self.global_pool(deepest * (1.0 + attention))
+            elif self.spatial_path == "gated":
+                assert self.local_pool is not None and self.fusion is not None
+                local_features = self.local_pool(deepest, lesion_logits)
+                base_features = self.fusion(global_features, local_features)
+                output["local_features"] = local_features
 
         fused_features = base_features
         if self.concept_head is not None:

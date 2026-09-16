@@ -1,0 +1,47 @@
+phase: 8
+output_root: experiments/optimization/hosp_bonenet
+parent_alias: hosp_bonenet.phase7.selected
+model_config: hosp_bonenet.yaml
+data_config: data.yaml
+schema_path: workspace/annotations/label_schema.yaml
+split_dir: workspace/splits
+allowed_splits: [fit_train, val]
+selection_split: val
+selection_metric: AUROC
+device: cuda
+amp: true
+seed: 42
+data_screen:
+  train_samples: 384
+  val_samples: 384
+  epochs: 1
+  early_stopping_patience: 1
+  benchmark_batches: 16
+  balance_strategies: [weighted_bce, unweighted, weighted_sampler]
+  augmentation_profiles: [current, weak]
+  image_sizes: [384, 512]
+optimization:
+  trials: 10
+  train_samples: 512
+  val_samples: 512
+  epochs: 2
+  early_stopping_patience: 1
+  learning_rates: [0.000003, 0.00001, 0.00003]
+  weight_decays: [0.000001, 0.0001, 0.0003]
+  warmup_epochs: [0, 1]
+  dropouts: [0.1, 0.2, 0.3]
+  label_smoothing: [0.0, 0.025, 0.05]
+ablations:
+  - {id: B0, component: plain ConvNeXt}
+  - {id: B1, component: classification-guided localization}
+  - {id: B2, component: global-local fusion}
+ablation_run:
+  train_samples: 768
+  val_samples: null
+  epochs: 2
+  early_stopping_patience: 1
+final_run:
+  train_samples: null
+  val_samples: null
+  epochs: 3
+  early_stopping_patience: 2

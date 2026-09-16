@@ -53,7 +53,8 @@ def _config(**overrides: object) -> HOSPConfig:
 
 def test_binary_only_configuration_omits_every_disabled_output() -> None:
     model = HOSPBoneNet(
-        _config(localization_enabled=False), encoder=TinyFeatureEncoder()
+        _config(localization_enabled=False, spatial_path="none"),
+        encoder=TinyFeatureEncoder(),
     ).eval()
 
     with torch.inference_mode():
@@ -64,6 +65,56 @@ def test_binary_only_configuration_omits_every_disabled_output() -> None:
     assert output["global_features"].shape == (2, 24)
     assert output["fused_features"].shape == (2, 24)
     assert all(torch.isfinite(value).all() for value in output.values())
+
+
+@pytest.mark.parametrize("spatial_path", ["attention", "gated"])
+def test_supported_spatial_paths_route_binary_features(spatial_path: str) -> None:
+    model = HOSPBoneNet(
+        _config(spatial_path=spatial_path), encoder=TinyFeatureEncoder()
+    ).eval()
+
+    with torch.inference_mode():
+        output = model(torch.randn(2, 3, 64, 64))
+
+    if spatial_path == "attention":
+        assert model.fusion is None
+        assert model.local_pool is None
+        assert "local_features" not in output
+        assert not torch.equal(output["fused_features"], output["global_features"])
+    else:
+        assert model.fusion is not None
+        assert model.local_pool is not None
+        assert not torch.equal(output["fused_features"], output["global_features"])
+        assert not torch.equal(output["fused_features"], output["local_features"])
+
+
+def test_attention_spatial_path_requires_localization_branch() -> None:
+    with pytest.raises(ValueError, match="spatial_path.*localization"):
+        _config(localization_enabled=False, spatial_path="attention")
+
+
+def test_unknown_spatial_path_is_rejected() -> None:
+    with pytest.raises(ValueError, match="spatial_path"):
+        _config(spatial_path="concatenate")
+
+
+def test_none_spatial_path_rejects_unused_localization_branch() -> None:
+    with pytest.raises(ValueError, match="spatial_path.*localization"):
+        _config(localization_enabled=True, spatial_path="none")
+
+
+def test_attention_path_gives_localization_head_binary_gradient() -> None:
+    model = HOSPBoneNet(
+        _config(spatial_path="attention"), encoder=TinyFeatureEncoder()
+    )
+
+    model(torch.randn(2, 3, 64, 64))["binary_logits"].sum().backward()
+
+    assert model.localization_head is not None
+    gradients = [parameter.grad for parameter in model.localization_head.parameters()]
+    assert gradients
+    assert all(gradient is not None for gradient in gradients)
+    assert any(torch.count_nonzero(gradient) > 0 for gradient in gradients if gradient is not None)
 
 
 def test_full_configuration_returns_aligned_configured_outputs() -> None:

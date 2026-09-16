@@ -8,7 +8,7 @@ import os
 import random
 import shutil
 import time
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -52,11 +52,21 @@ class BinaryTrainer:
         pos_weight: float | torch.Tensor,
         device: str | torch.device,
         resume_from: Path | None = None,
+        epoch_callback: Callable[[dict[str, Any]], None] | None = None,
     ) -> None:
         if not isinstance(model, nn.Module):
             raise TypeError("model must be a torch module")
         if not model_alias:
             raise ValueError("model_alias must be non-empty")
+        raw_label_smoothing = resolved_config.get("label_smoothing", 0.0)
+        if isinstance(raw_label_smoothing, bool):
+            raise ValueError("label_smoothing must be numeric in [0, 1)")
+        try:
+            label_smoothing = float(raw_label_smoothing)
+        except (TypeError, ValueError) as error:
+            raise ValueError("label_smoothing must be numeric in [0, 1)") from error
+        if not math.isfinite(label_smoothing) or not 0.0 <= label_smoothing < 1.0:
+            raise ValueError("label_smoothing must be numeric in [0, 1)")
         try:
             self.resolved_config = json.loads(
                 json.dumps(dict(resolved_config), allow_nan=False)
@@ -68,6 +78,7 @@ class BinaryTrainer:
         self.gradient_clip_norm = self._positive_float("gradient_clip_norm", 1.0)
         self.seed = self._integer("seed", 42)
         self.selection_metric = str(self.resolved_config.get("selection_metric", "AUROC"))
+        self.label_smoothing = label_smoothing
         if self.selection_metric != "AUROC":
             raise ValueError("validation AUROC is the only supported selection metric")
         self.monitor_extended = bool(self.resolved_config.get("monitor_extended", False))
@@ -84,6 +95,7 @@ class BinaryTrainer:
             raise RuntimeError("CUDA training requested but CUDA is unavailable")
         self.model = model.to(self.device)
         self.model_alias = model_alias
+        self.epoch_callback = epoch_callback
         self.checkpoint_dir = Path(checkpoint_dir)
         self.best_checkpoint_path = self.checkpoint_dir / "best.pt"
         self.last_checkpoint_path = self.checkpoint_dir / "last.pt"
@@ -339,9 +351,14 @@ class BinaryTrainer:
                 continue
             with autocast_context(self.device, self.amp_requested):
                 logits = self._normalize_logits(self.model(images), targets)
+                loss_targets = targets
+                if self.label_smoothing:
+                    loss_targets = targets * (1.0 - self.label_smoothing) + (
+                        0.5 * self.label_smoothing
+                    )
                 loss_sum = functional.binary_cross_entropy_with_logits(
                     logits,
-                    targets,
+                    loss_targets,
                     pos_weight=self.pos_weight,
                     reduction="sum",
                 )
@@ -503,6 +520,8 @@ class BinaryTrainer:
                         "stage": self.stage_name,
                         "train_binary_loss": train_record["train_loss"],
                         "val_binary_loss": validation_record["val_loss"],
+                        "val_binary_loss_hard_targets": validation_record["val_loss"],
+                        "train_label_smoothing": self.label_smoothing,
                         "epoch_time_seconds": time.perf_counter() - epoch_started,
                         "peak_cuda_memory_bytes": (
                             int(torch.cuda.max_memory_allocated(self.device))
@@ -517,6 +536,8 @@ class BinaryTrainer:
             self._save("last.pt", epoch=epoch, selection_value=selection_value)
             if improved:
                 self._save("best.pt", epoch=epoch, selection_value=selection_value)
+            if self.epoch_callback is not None:
+                self.epoch_callback(dict(record))
             if self.monitor_extended:
                 print(
                     "phase7_epoch "

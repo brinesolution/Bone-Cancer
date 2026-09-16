@@ -644,6 +644,45 @@ def test_fit_applies_bce_positive_class_weight(tmp_path: Path) -> None:
     assert weighted_result["history"][0]["train_loss"] == pytest.approx(1.386294, rel=1e-5)
 
 
+def test_fit_applies_configured_binary_label_smoothing(tmp_path: Path) -> None:
+    loader = [_batch([4.0, 1.0], [0, 1], ["negative", "positive"])]
+    config = _config(epochs=1)
+    config["label_smoothing"] = 0.2
+    trainer = BinaryTrainer(
+        TinyBinaryModel(0.5),
+        model_alias="densenet121",
+        resolved_config=config,
+        checkpoint_dir=tmp_path / "smoothed",
+        pos_weight=1.0,
+        device="cpu",
+    )
+
+    result = trainer.fit(loader, _val_batches())
+    logits = torch.tensor([2.0, 0.5])
+    smoothed_targets = torch.tensor([0.1, 0.9])
+    expected = torch.nn.functional.binary_cross_entropy_with_logits(
+        logits, smoothed_targets
+    )
+
+    assert result["history"][0]["train_loss"] == pytest.approx(float(expected))
+
+
+@pytest.mark.parametrize("value", [-0.01, 1.0, float("nan"), True])
+def test_trainer_rejects_invalid_label_smoothing(tmp_path: Path, value: object) -> None:
+    config = _config(epochs=1)
+    config["label_smoothing"] = value
+
+    with pytest.raises(ValueError, match="label_smoothing"):
+        BinaryTrainer(
+            TinyBinaryModel(),
+            model_alias="densenet121",
+            resolved_config=config,
+            checkpoint_dir=tmp_path,
+            pos_weight=1.0,
+            device="cpu",
+        )
+
+
 def test_fit_is_deterministic_for_fixed_seed(tmp_path: Path) -> None:
     first = _trainer(tmp_path / "first", epochs=2)
     second = _trainer(tmp_path / "second", epochs=2)
@@ -653,6 +692,33 @@ def test_fit_is_deterministic_for_fixed_seed(tmp_path: Path) -> None:
 
     assert first_result["history"] == second_result["history"]
     assert torch.equal(first.model.weight.detach(), second.model.weight.detach())
+
+
+def test_epoch_callback_runs_after_durable_checkpoint_and_can_prune(tmp_path: Path) -> None:
+    observed: list[int] = []
+
+    class Pruned(RuntimeError):
+        pass
+
+    def callback(record: dict[str, Any]) -> None:
+        observed.append(int(record["epoch"]))
+        assert (tmp_path / "last.pt").is_file()
+        raise Pruned("stop trial")
+
+    trainer = BinaryTrainer(
+        TinyBinaryModel(),
+        model_alias="densenet121",
+        resolved_config=_config(epochs=3),
+        checkpoint_dir=tmp_path,
+        pos_weight=1.0,
+        device="cpu",
+        epoch_callback=callback,
+    )
+
+    with pytest.raises(Pruned, match="stop trial"):
+        trainer.fit(_train_batches(), _val_batches())
+
+    assert observed == [1]
 
 
 class InterruptAfter(Iterable[dict[str, Any]]):
