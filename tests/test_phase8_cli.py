@@ -8,9 +8,11 @@ from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 
+import pandas as pd
 import pytest
 import torch
 
+from bone_cancer_ai.evaluation.classification import binary_classification_metrics
 from bone_cancer_ai.optimization import workflow
 
 
@@ -69,12 +71,29 @@ def test_completed_stage_requires_matching_signature_and_checkpoint_digest(
     stage.mkdir()
     checkpoint = stage / "best.pt"
     torch.save({"model_state": {}}, checkpoint)
+    (stage / "config.yaml").write_text("stage: synthetic\n", encoding="utf-8")
+    pd.DataFrame([{"epoch": 1, "val_AUROC": 1.0}]).to_csv(
+        stage / "history.csv", index=False
+    )
+    predictions = pd.DataFrame(
+        {
+            "sample_id": ["negative", "positive"],
+            "target": [0, 1],
+            "logit": [-2.0, 2.0],
+            "probability": torch.sigmoid(torch.tensor([-2.0, 2.0])).tolist(),
+        }
+    )
+    predictions.to_csv(stage / "validation_predictions.csv", index=False)
+    validation = binary_classification_metrics(predictions["logit"], predictions["target"])
     metrics = {
         "status": "complete",
         "signature": "expected",
         "best_checkpoint": "best.pt",
         "checkpoint_sha256": module.sha256_file(checkpoint),
-        "validation": {"AUROC": 0.9},
+        "config_sha256": module.sha256_file(stage / "config.yaml"),
+        "history_sha256": module.sha256_file(stage / "history.csv"),
+        "predictions_sha256": module.sha256_file(stage / "validation_predictions.csv"),
+        "validation": validation,
     }
     (stage / "metrics.json").write_text(json.dumps(metrics), encoding="utf-8")
 

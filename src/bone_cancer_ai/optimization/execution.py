@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gc
 import json
 import math
 import os
@@ -131,14 +132,14 @@ def _trainer_config(
     }
 
 
-def _deduplicate_best_last(stage_dir: Path) -> None:
+def _deduplicate_best_last(
+    stage_dir: Path, *, best_epoch: int, last_epoch: int
+) -> None:
     best = stage_dir / "best.pt"
     last = stage_dir / "last.pt"
     if not best.is_file() or not last.is_file():
         return
-    best_payload = torch.load(best, map_location="cpu", weights_only=True)
-    last_payload = torch.load(last, map_location="cpu", weights_only=True)
-    if best_payload.get("epoch") != last_payload.get("epoch"):
+    if best_epoch != last_epoch:
         return
     last.unlink()
     try:
@@ -206,8 +207,12 @@ def training_stage(
     )
     result = trainer.fit(loaders["fit_train"], loaders["val"])
     best_path = Path(result["best_checkpoint"])
-    checkpoint = torch.load(best_path, map_location=context["device"], weights_only=True)
+    checkpoint = torch.load(best_path, map_location="cpu", weights_only=True)
     model.load_state_dict(checkpoint["model_state"], strict=True)
+    del checkpoint
+    gc.collect()
+    if context["device"].type == "cuda":
+        torch.cuda.empty_cache()
     prediction = trainer.predict(loaders["val"])
     validation = binary_classification_metrics(prediction["logits"], prediction["targets"])
     for name in METRIC_COLUMNS:
@@ -223,7 +228,11 @@ def training_stage(
         }
     ).to_csv(stage_dir / "validation_predictions.csv", index=False)
     pd.DataFrame(result["history"]).to_csv(stage_dir / "history.csv", index=False)
-    _deduplicate_best_last(stage_dir)
+    _deduplicate_best_last(
+        stage_dir,
+        best_epoch=int(result["best_epoch"]),
+        last_epoch=int(result["history"][-1]["epoch"]),
+    )
     payload = {
         "status": "complete",
         "signature": signature,
@@ -231,6 +240,9 @@ def training_stage(
         "best_epoch": int(result["best_epoch"]),
         "best_checkpoint": best_path.name,
         "checkpoint_sha256": sha256_file(best_path),
+        "config_sha256": sha256_file(stage_dir / "config.yaml"),
+        "history_sha256": sha256_file(stage_dir / "history.csv"),
+        "predictions_sha256": sha256_file(stage_dir / "validation_predictions.csv"),
         "validation": validation,
         "valid_samples": int(prediction["valid_count"]),
         "rejected_samples": int(prediction["rejected_count"]),

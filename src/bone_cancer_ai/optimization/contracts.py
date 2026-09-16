@@ -10,8 +10,10 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+import pandas as pd
 import yaml
 
+from bone_cancer_ai.evaluation.classification import binary_classification_metrics
 from bone_cancer_ai.optimization.phase8 import ensure_validation_only
 
 CONFIG_KEYS = {
@@ -183,6 +185,22 @@ def load_completed_stage(stage_dir: Path, signature: str) -> dict[str, Any] | No
         raise ValueError("completed stage checkpoint checksum does not match")
     if not isinstance(metrics.get("validation"), dict):
         raise ValueError("completed stage validation metrics are missing")
+    companions = {
+        "config.yaml": "config_sha256",
+        "history.csv": "history_sha256",
+        "validation_predictions.csv": "predictions_sha256",
+    }
+    for filename, hash_field in companions.items():
+        path = Path(stage_dir) / filename
+        if not path.is_file() or sha256_file(path) != metrics.get(hash_field):
+            raise ValueError(f"completed stage companion checksum differs: {filename}")
+    predictions = pd.read_csv(Path(stage_dir) / "validation_predictions.csv")
+    if predictions.empty or not {"target", "logit"} <= set(predictions):
+        raise ValueError("completed stage predictions are malformed")
+    recomputed = binary_classification_metrics(predictions["logit"], predictions["target"])
+    for name in METRIC_COLUMNS:
+        if abs(float(recomputed[name]) - float(metrics["validation"][name])) > 1e-10:
+            raise ValueError(f"completed stage validation metric differs: {name}")
     return metrics
 
 

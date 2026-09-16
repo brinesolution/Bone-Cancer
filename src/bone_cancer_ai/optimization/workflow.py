@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gc
 import json
 import math
 import os
@@ -46,6 +47,7 @@ from bone_cancer_ai.optimization.phase8 import (
     phase8_fingerprint,
     select_validation_candidate,
 )
+from bone_cancer_ai.training.trainer import BinaryTrainer
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
@@ -392,8 +394,23 @@ def _context(config_path: Path, config: Mapping[str, Any]) -> dict[str, Any]:
         "phase8_contracts": root / "src/bone_cancer_ai/optimization/contracts.py",
         "phase8_execution": root / "src/bone_cancer_ai/optimization/execution.py",
         "phase8_workflow": root / "src/bone_cancer_ai/optimization/workflow.py",
+        "phase8_selection": root / "src/bone_cancer_ai/optimization/phase8.py",
+        "phase8_frozen_loader": root / "src/bone_cancer_ai/optimization/frozen.py",
         "hosp_model": root / "src/bone_cancer_ai/models/hosp_bonenet/model.py",
         "binary_trainer": root / "src/bone_cancer_ai/training/trainer.py",
+        "data_module": root / "src/bone_cancer_ai/data/datamodule.py",
+        "data_cache": root / "src/bone_cancer_ai/data/cache.py",
+        "dataset": root / "src/bone_cancer_ai/data/dataset.py",
+        "transforms": root / "src/bone_cancer_ai/data/transforms.py",
+        "samplers": root / "src/bone_cancer_ai/data/samplers.py",
+        "classification_metrics": root / "src/bone_cancer_ai/evaluation/classification.py",
+        "checkpointing": root / "src/bone_cancer_ai/training/checkpointing.py",
+        "optimizer": root / "src/bone_cancer_ai/training/optimizer.py",
+        "scheduler": root / "src/bone_cancer_ai/training/scheduler.py",
+        "amp": root / "src/bone_cancer_ai/training/amp.py",
+        "callbacks": root / "src/bone_cancer_ai/training/callbacks.py",
+        "artifact_registry": root / "src/bone_cancer_ai/artifacts/registry.py",
+        "dependency_lock": root / "requirements/lock_windows_gpu.txt",
     }
     input_hashes = {name: sha256_file(path) for name, path in input_paths.items()}
     full_fit_frame = pd.read_csv(input_paths["fit_train"])
@@ -452,7 +469,7 @@ def _validate_local_bundle(
     required = {
         "final_config.yaml", "selection.json", "hosp_ablation.csv", "trials.csv",
         "data_screen.csv", "cache_throughput.csv", "selected.pt",
-        "selected_validation_predictions.csv", "provenance.json",
+        "selected_validation_predictions.csv", "provenance.json", "study.db",
     }
     missing = [name for name in required if not (run_dir / name).is_file()]
     if missing:
@@ -495,6 +512,72 @@ def _validate_local_bundle(
     trials = pd.read_csv(run_dir / "trials.csv")
     if len(trials) != 10 or trials["trial"].nunique() != 10 or int(trials["selected"].sum()) != 1:
         raise ValueError("Phase 8 trial table is incomplete or ambiguous")
+
+    import optuna
+
+    study = optuna.load_study(
+        study_name=f"phase8-{run_dir.name}",
+        storage=f"sqlite:///{(run_dir / 'study.db').resolve().as_posix()}",
+    )
+    terminal_states = {
+        optuna.trial.TrialState.COMPLETE,
+        optuna.trial.TrialState.PRUNED,
+    }
+    terminal = [trial for trial in study.trials if trial.state in terminal_states]
+    if len(terminal) != 10:
+        raise ValueError("Phase 8 study does not contain ten terminal trials")
+    csv_by_number = {
+        int(str(row.trial).split("_")[1]): row
+        for row in trials.itertuples(index=False)
+    }
+    if set(csv_by_number) != {trial.number for trial in terminal}:
+        raise ValueError("Phase 8 study trial numbers differ from trials.csv")
+    for trial in terminal:
+        row = csv_by_number[trial.number]
+        if row.state != trial.state.name:
+            raise ValueError("Phase 8 study trial state differs from trials.csv")
+        for name, value in trial.params.items():
+            recorded = getattr(row, name)
+            if isinstance(value, float):
+                if not math.isclose(float(recorded), value, rel_tol=1e-12, abs_tol=1e-12):
+                    raise ValueError("Phase 8 study parameters differ from trials.csv")
+            elif recorded != value:
+                raise ValueError("Phase 8 study parameters differ from trials.csv")
+
+    module, _ = make_data(context, frozen["data"], train_limit=None, val_limit=None)
+    verifier = BinaryTrainer(
+        model,
+        model_alias="hosp_bonenet_phase8_verifier",
+        resolved_config={
+            "epochs": 1,
+            "learning_rate": 1e-5,
+            "weight_decay": 0.0,
+            "warmup_epochs": 0,
+            "label_smoothing": 0.0,
+            "amp": bool(context["amp"]),
+            "gradient_accumulation_steps": 1,
+            "gradient_clip_norm": 1.0,
+            "early_stopping_patience": 1,
+            "seed": int(context["seed"]),
+            "selection_metric": "AUROC",
+        },
+        checkpoint_dir=run_dir / "verification_only",
+        pos_weight=1.0,
+        device=context["device"],
+    )
+    actual = verifier.predict(module.loader("val"))
+    if actual["sample_ids"] != predictions["sample_id"].astype(str).tolist():
+        raise ValueError("selected checkpoint sample IDs differ from saved predictions")
+    saved_targets = torch.as_tensor(predictions["target"].to_numpy(), dtype=torch.long)
+    saved_logits = torch.as_tensor(predictions["logit"].to_numpy(), dtype=torch.float32)
+    if not torch.equal(actual["targets"], saved_targets) or not torch.allclose(
+        actual["logits"], saved_logits, rtol=1e-5, atol=1e-5
+    ):
+        raise ValueError("selected checkpoint inference differs from saved predictions")
+    del actual, verifier, model, module
+    gc.collect()
+    if context["device"].type == "cuda":
+        torch.cuda.empty_cache()
     return selection
 
 
@@ -515,15 +598,19 @@ def _publish_selection(
     alias = "hosp_bonenet.phase8.selected"
     global_config = root / "configs" / "hosp_bonenet_phase8_final.yaml"
     global_metrics = root / "artifacts" / "metrics" / "hosp_ablation.csv"
-    snapshots = {
-        global_config: (
-            global_config.read_text(encoding="utf-8") if global_config.exists() else None
-        ),
-        global_metrics: (
-            global_metrics.read_text(encoding="utf-8") if global_metrics.exists() else None
-        ),
-    }
     with checkpoint_publication_lock(root, "hosp_bonenet.phase8.publication"):
+        snapshots = {
+            global_config: (
+                global_config.read_text(encoding="utf-8")
+                if global_config.exists()
+                else None
+            ),
+            global_metrics: (
+                global_metrics.read_text(encoding="utf-8")
+                if global_metrics.exists()
+                else None
+            ),
+        }
         promotion = promote_checkpoint_transaction(
             root,
             alias=alias,
@@ -556,14 +643,20 @@ def _publish_selection(
                 {"status": "complete", "fingerprint": fingerprint, "phase": 8},
             )
         except Exception:
-            restore_checkpoint_alias(
-                root,
-                alias=alias,
-                expected_current=promotion.promoted,
-                previous=promotion.previous,
-            )
+            rollback_error: Exception | None = None
+            try:
+                restore_checkpoint_alias(
+                    root,
+                    alias=alias,
+                    expected_current=promotion.promoted,
+                    previous=promotion.previous,
+                )
+            except Exception as error:
+                rollback_error = error
             for path, prior in snapshots.items():
                 _restore_text(path, prior)
+            if rollback_error is not None:
+                raise RuntimeError("Phase 8 alias rollback failed") from rollback_error
             raise
     return selection
 
@@ -641,7 +734,8 @@ def _run_phase8_locked(
         },
         hparams=best_hparams,
     )
-    incumbent = evaluation_stage(context, run_dir / "incumbent", settings)
+    incumbent_settings = base_settings()
+    incumbent = evaluation_stage(context, run_dir / "incumbent", incumbent_settings)
     selected = select_validation_candidate(
         [
             {
@@ -743,7 +837,7 @@ def run_phase8(config_path: Path, *, force_new_run: bool = False) -> dict[str, A
     context = _context(config_path, config)
     run_dir, fingerprint = _run_directory(context, force_new_run=force_new_run)
     run_dir.mkdir(parents=True, exist_ok=True)
-    lock_alias = f"hosp_bonenet.phase8.run.{fingerprint[:12]}"
+    lock_alias = f"hosp_bonenet.phase8.run.f{fingerprint[:12]}"
     with checkpoint_publication_lock(context["root"], lock_alias):
         try:
             return _run_phase8_locked(context, config, run_dir, fingerprint)
