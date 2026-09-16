@@ -27,7 +27,8 @@ content-addressed checkpoint files.
 ## Execution
 Phase 5/7 training registers selected checkpoints through the shared API. Run
 `python tools/refresh_checkpoint_registry.py` to revalidate existing selections and
-rebuild all five aliases without training.
+register missing or idempotent aliases without training. Refresh refuses to replace a
+selected alias that identifies a different artifact.
 
 ## Notes
 Do not edit `registry.json` or generated weights manually. Git tracks registry metadata, never large checkpoints.

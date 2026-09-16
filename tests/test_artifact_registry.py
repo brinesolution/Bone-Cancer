@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import threading
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -40,19 +41,17 @@ def _second_checkpoint(project_root: Path, payload: bytes) -> Path:
     return checkpoint
 
 
-def _synchronize_initial_registry_reads(monkeypatch: pytest.MonkeyPatch) -> None:
-    original_load = registry_module._load_registry
+def _synchronize_before_registry_lock(monkeypatch: pytest.MonkeyPatch) -> None:
+    original_lock = registry_module._registry_lock
     barrier = threading.Barrier(2)
 
-    def synchronized_load(root: Path, registry_path: Path) -> dict[str, object]:
-        if not registry_path.exists():
-            try:
-                barrier.wait(timeout=0.25)
-            except threading.BrokenBarrierError:
-                pass
-        return original_load(root, registry_path)
+    @contextmanager
+    def synchronized_lock(project_root: Path):
+        barrier.wait()
+        with original_lock(project_root):
+            yield
 
-    monkeypatch.setattr(registry_module, "_load_registry", synchronized_load)
+    monkeypatch.setattr(registry_module, "_registry_lock", synchronized_lock)
 
 
 def _start_parallel_promotions(
@@ -222,7 +221,7 @@ def test_concurrent_promotions_preserve_distinct_aliases(
     project_root = tmp_path / "project"
     first = _checkpoint(project_root, b"first checkpoint")
     second = _second_checkpoint(project_root, b"second checkpoint")
-    _synchronize_initial_registry_reads(monkeypatch)
+    _synchronize_before_registry_lock(monkeypatch)
 
     results, errors = _start_parallel_promotions(
         [
@@ -248,7 +247,7 @@ def test_concurrent_promotions_reject_a_conflicting_alias(
     project_root = tmp_path / "project"
     first = _checkpoint(project_root, b"first checkpoint")
     second = _second_checkpoint(project_root, b"second checkpoint")
-    _synchronize_initial_registry_reads(monkeypatch)
+    _synchronize_before_registry_lock(monkeypatch)
 
     results, errors = _start_parallel_promotions(
         [

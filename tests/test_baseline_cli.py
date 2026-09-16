@@ -479,8 +479,8 @@ class _FakeTrainer:
         self.directory.joinpath("last.pt").write_bytes(b"last")
         return {
             "best_epoch": 1,
-            "best_AUROC": 1.0,
-            "history": [{"epoch": 1, "train_loss": 0.2, "val_AUROC": 1.0}],
+            "best_AUROC": 0.8,
+            "history": [{"epoch": 1, "train_loss": 0.2, "val_AUROC": 0.8}],
         }
 
     def predict(self, loader):
@@ -505,7 +505,13 @@ def _fake_dependencies(events: list[str]):
         assert Path(path).name == "best.pt"
         kwargs["model"].weight.data.fill_(2.0)
         events.append("load_best")
-        return {"epoch": 1}
+        return {
+            "epoch": 1,
+            "selection_metric": "AUROC",
+            "selection_value": 0.8,
+            "resolved_config": kwargs["expected_resolved_config"],
+            "history": [{"epoch": 1, "train_loss": 0.2, "val_AUROC": 0.8}],
+        }
 
     def metrics(logits, targets, threshold=0.5):
         del targets, threshold
@@ -553,6 +559,16 @@ def _fake_dependencies(events: list[str]):
     )
 
 
+def _fake_validation_dependencies(
+    events: list[str] | None = None,
+) -> baseline_cli.CheckpointValidationDependencies:
+    dependencies = _fake_dependencies(events or [])
+    return baseline_cli.CheckpointValidationDependencies(
+        create_model=dependencies.create_model,
+        load_checkpoint=dependencies.load_checkpoint,
+    )
+
+
 def test_successful_runs_are_unique_complete_and_never_use_test_for_selection(
     tmp_path: Path,
 ) -> None:
@@ -590,6 +606,7 @@ def test_successful_runs_are_unique_complete_and_never_use_test_for_selection(
         "load_best",
         "predict:val",
         "predict:test",
+        "load_best",
     ] * 2
     metrics = json.loads(first.joinpath("metrics.json").read_text(encoding="utf-8"))
     assert metrics["validation"]["AUROC"] == 0.8
@@ -647,6 +664,81 @@ def test_force_new_run_retrains_and_replaces_its_selected_baseline_alias(
     assert second != first
     selected = resolve_checkpoint(project_root, "baseline.densenet121.phase5.selected")
     assert selected.source_run == second.relative_to(project_root).as_posix()
+
+
+def test_promotion_failure_preserves_prior_summary_and_selected_alias(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from bone_cancer_ai.artifacts import registry as registry_module
+    from bone_cancer_ai.artifacts.registry import resolve_checkpoint
+
+    config = _project_config(tmp_path)
+    project_root = config.parents[1]
+    baseline_cli.run_baseline(config, dependencies=_fake_dependencies([]))
+    summary_path = project_root / "artifacts" / "metrics" / "baseline_summary.csv"
+    summary_before = summary_path.read_bytes()
+    alias_before = resolve_checkpoint(
+        project_root, "baseline.densenet121.phase5.selected"
+    )
+    forced = _fake_dependencies([])
+    forced.latency = lambda *args, **kwargs: {
+        "device": "cuda",
+        "warmup": 1,
+        "repetitions": 1,
+        "total_elapsed_ms": 3.5,
+        "latency_ms": 3.5,
+    }
+
+    def fail_promotion(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise OSError("synthetic promotion failure")
+
+    monkeypatch.setattr(registry_module, "promote_checkpoint", fail_promotion)
+    with pytest.raises(OSError, match="synthetic promotion failure"):
+        baseline_cli.run_baseline(
+            config,
+            dependencies=forced,
+            force_new_run=True,
+        )
+
+    assert summary_path.read_bytes() == summary_before
+    assert (
+        resolve_checkpoint(project_root, "baseline.densenet121.phase5.selected")
+        == alias_before
+    )
+
+
+def test_summary_publication_failure_rolls_back_selected_alias(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from bone_cancer_ai.artifacts.registry import resolve_checkpoint
+
+    config = _project_config(tmp_path)
+    project_root = config.parents[1]
+    baseline_cli.run_baseline(config, dependencies=_fake_dependencies([]))
+    summary_path = project_root / "artifacts" / "metrics" / "baseline_summary.csv"
+    summary_before = summary_path.read_bytes()
+    alias_before = resolve_checkpoint(
+        project_root, "baseline.densenet121.phase5.selected"
+    )
+
+    def fail_publication(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise OSError("synthetic summary publication failure")
+
+    monkeypatch.setattr(report_module, "update_baseline_summary", fail_publication)
+    with pytest.raises(OSError, match="synthetic summary publication failure"):
+        baseline_cli.run_baseline(
+            config,
+            dependencies=_fake_dependencies([]),
+            force_new_run=True,
+        )
+
+    assert summary_path.read_bytes() == summary_before
+    assert (
+        resolve_checkpoint(project_root, "baseline.densenet121.phase5.selected")
+        == alias_before
+    )
 
 
 def test_tampered_exact_completed_run_fails_closed_without_training(tmp_path: Path) -> None:
@@ -1206,7 +1298,9 @@ def test_registry_refresh_registers_all_four_validated_phase5_selections(
     root, runs = _four_final_runs(tmp_path)
     (root / "artifacts" / "checkpoints" / "registry.json").unlink()
 
-    result = baseline_cli.refresh_phase5_registry(root)
+    result = baseline_cli.refresh_phase5_registry(
+        root, validation_dependencies=_fake_validation_dependencies()
+    )
 
     assert result == {
         "aliases": [
@@ -1223,6 +1317,19 @@ def test_registry_refresh_registers_all_four_validated_phase5_selections(
         assert selected.model_family == model
         assert selected.phase == "phase_5"
         assert selected.source_run == run.relative_to(root).as_posix()
+
+
+def test_production_refresh_rejects_unloadable_checkpoint_before_first_registration(
+    tmp_path: Path,
+) -> None:
+    root, _ = _four_final_runs(tmp_path)
+    registry_path = root / "artifacts" / "checkpoints" / "registry.json"
+    registry_path.unlink()
+
+    with pytest.raises(ValueError, match="checkpoint payload"):
+        baseline_cli.refresh_phase5_registry(root)
+
+    assert not registry_path.exists()
 
 
 def test_validator_rejects_stale_summary_instead_of_matching_an_older_run(

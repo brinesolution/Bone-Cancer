@@ -5,8 +5,9 @@ Local annotation and verified-artifact maintenance tools.
 
 ## Files
 `annotation_app/`: Phase 4 app/storage/validator modules.
-`refresh_checkpoint_registry.py`: validates existing Phase 5/7 selections and rebuilds
-their five stable checkpoint aliases without training.
+`refresh_checkpoint_registry.py`: validates existing Phase 5/7 selections and registers
+their missing or idempotent stable checkpoint aliases without training; it does not replace
+an alias that identifies a different selection.
 
 ## Inputs
 Reviewed annotation state and completed, validated training bundles.

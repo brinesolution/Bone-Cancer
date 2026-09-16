@@ -222,6 +222,14 @@ class RunDependencies:
     cuda_reset_peak: Callable[[], None]
 
 
+@dataclass(frozen=True)
+class CheckpointValidationDependencies:
+    """CPU-only model construction and validated checkpoint loading boundaries."""
+
+    create_model: Callable[..., Any]
+    load_checkpoint: Callable[..., Mapping[str, Any]]
+
+
 def _default_dependencies() -> RunDependencies:
     import torch
 
@@ -249,6 +257,30 @@ def _default_dependencies() -> RunDependencies:
         cuda_peak_memory=torch.cuda.max_memory_allocated,
         cuda_reset_peak=torch.cuda.reset_peak_memory_stats,
     )
+
+
+def _default_checkpoint_validation_dependencies() -> CheckpointValidationDependencies:
+    from bone_cancer_ai.models.baselines.factory import create_baseline
+    from bone_cancer_ai.training.checkpointing import load_checkpoint
+
+    return CheckpointValidationDependencies(
+        create_model=create_baseline,
+        load_checkpoint=load_checkpoint,
+    )
+
+
+def _checkpoint_validation_dependencies(
+    dependencies: RunDependencies | None,
+    validation_dependencies: CheckpointValidationDependencies | None,
+) -> CheckpointValidationDependencies:
+    if validation_dependencies is not None:
+        return validation_dependencies
+    if dependencies is not None:
+        return CheckpointValidationDependencies(
+            create_model=dependencies.create_model,
+            load_checkpoint=dependencies.load_checkpoint,
+        )
+    return _default_checkpoint_validation_dependencies()
 
 
 def _load_yaml(path: Path, *, name: str) -> dict[str, Any]:
@@ -950,6 +982,7 @@ def run_baseline(
     pretrained_override: bool | None = None,
     limit_batches: int | None = None,
     dependencies: RunDependencies | None = None,
+    validation_dependencies: CheckpointValidationDependencies | None = None,
     force_new_run: bool = False,
 ) -> Path:
     """Execute one immutable train/validate/test baseline run."""
@@ -965,6 +998,9 @@ def run_baseline(
     if type(force_new_run) is not bool:
         raise ValueError("force_new_run must be a boolean")
     project_root = Path(runtime["project_root"])
+    checkpoint_validation = _checkpoint_validation_dependencies(
+        dependencies, validation_dependencies
+    )
     if record["run_type"] == "final" and not force_new_run:
         reusable = _find_exact_completed_run(
             Path(runtime["output_root"]), record, project_root
@@ -974,6 +1010,12 @@ def run_baseline(
                 project_root, str(record["model"]), int(record["seed"])
             )
             _validate_run_bundle(reusable, str(record["model"]), summary_row)
+            _validate_selected_checkpoint(
+                reusable,
+                record,
+                summary_row,
+                dependencies=checkpoint_validation,
+            )
             _register_baseline_checkpoint(
                 reusable,
                 record,
@@ -1109,16 +1151,34 @@ def run_baseline(
         if is_final_run_config(record) and _is_sanitized_run_record(
             record, str(record["model"])
         ):
-            update_baseline_summary(
-                project_root / "artifacts" / "metrics" / "baseline_summary.csv", summary_row
-            )
             _validate_run_bundle(run_dir, str(record["model"]), summary_row)
-            _register_baseline_checkpoint(
+            _validate_selected_checkpoint(
+                run_dir,
+                record,
+                summary_row,
+                dependencies=checkpoint_validation,
+            )
+            promoted, previous = _register_baseline_checkpoint(
                 run_dir,
                 record,
                 project_root=project_root,
                 replace_alias=force_new_run,
             )
+            try:
+                update_baseline_summary(
+                    project_root / "artifacts" / "metrics" / "baseline_summary.csv",
+                    summary_row,
+                )
+            except Exception:
+                from bone_cancer_ai.artifacts.registry import restore_checkpoint_alias
+
+                restore_checkpoint_alias(
+                    project_root,
+                    alias=_selected_checkpoint_alias(str(record["model"])),
+                    expected_current=promoted,
+                    previous=previous,
+                )
+                raise
         return run_dir
     except torch.cuda.OutOfMemoryError as error:
         guidance = (
@@ -1294,6 +1354,97 @@ def _validate_run_bundle(run_dir: Path, alias: str, summary_row: Any) -> None:
             raise ValueError(f"summary {column} does not match run {run_dir.name}")
 
 
+def _checkpoint_history_matches(
+    checkpoint_history: object, history: Any, *, selected_epoch: int
+) -> bool:
+    if not isinstance(checkpoint_history, list) or len(checkpoint_history) != selected_epoch:
+        return False
+    expected = history.iloc[:selected_epoch].to_dict(orient="records")
+    if len(expected) != len(checkpoint_history):
+        return False
+    for actual_row, expected_row in zip(checkpoint_history, expected, strict=True):
+        if not isinstance(actual_row, Mapping) or set(actual_row) != set(expected_row):
+            return False
+        for key, expected_value in expected_row.items():
+            actual_value = actual_row[key]
+            if isinstance(expected_value, (int, float)) and not isinstance(
+                expected_value, bool
+            ):
+                if isinstance(actual_value, bool) or not isinstance(
+                    actual_value, (int, float)
+                ):
+                    return False
+                if not math.isclose(
+                    float(actual_value),
+                    float(expected_value),
+                    rel_tol=1e-12,
+                    abs_tol=1e-12,
+                ):
+                    return False
+            elif not _strict_equal(actual_value, expected_value):
+                return False
+    return True
+
+
+def _validate_selected_checkpoint(
+    run_dir: Path,
+    record: Mapping[str, Any],
+    summary_row: Any,
+    *,
+    dependencies: CheckpointValidationDependencies,
+) -> dict[str, Any]:
+    """Load and cross-check one selected checkpoint on CPU before promotion."""
+
+    import pandas as pd
+
+    model_alias = str(record["model"])
+    model = dependencies.create_model(
+        name=model_alias,
+        pretrained=False,
+        image_size=int(record["image_size"]),
+    )
+    try:
+        metadata = dict(
+            dependencies.load_checkpoint(
+                run_dir / "best.pt",
+                model=model,
+                expected_model_alias=model_alias,
+                map_location="cpu",
+                expected_resolved_config=record,
+                expected_selection_metric="AUROC",
+            )
+        )
+    except Exception as error:
+        raise ValueError(f"checkpoint payload validation failed for {run_dir.name}") from error
+    metrics = _strict_json(run_dir / "metrics.json")
+    history = pd.read_csv(run_dir / "history.csv")
+    selected_epoch = int(summary_row["best_epoch"])
+    selected_value = float(metrics["validation"]["AUROC"])
+    if metadata.get("epoch") != selected_epoch:
+        raise ValueError("checkpoint selected epoch does not match bundle metadata")
+    if metadata.get("selection_metric") != "AUROC":
+        raise ValueError("checkpoint selection metric does not match bundle metadata")
+    checkpoint_value = metadata.get("selection_value")
+    if isinstance(checkpoint_value, bool) or not isinstance(checkpoint_value, (int, float)):
+        raise ValueError("checkpoint selection value is invalid")
+    if not math.isclose(
+        float(checkpoint_value), selected_value, rel_tol=1e-12, abs_tol=1e-12
+    ):
+        raise ValueError("checkpoint selection value does not match validation AUROC")
+    if selected_epoch != int(history["epoch"].loc[history["val_AUROC"].idxmax()]):
+        raise ValueError("checkpoint selected epoch does not match bundle history")
+    history_value = float(
+        history.loc[history["epoch"] == selected_epoch, "val_AUROC"].iloc[0]
+    )
+    if not math.isclose(history_value, selected_value, rel_tol=1e-12, abs_tol=1e-12):
+        raise ValueError("checkpoint selection value does not match bundle history")
+    if not _checkpoint_history_matches(
+        metadata.get("history"), history, selected_epoch=selected_epoch
+    ):
+        raise ValueError("checkpoint history does not match the persisted history")
+    return metadata
+
+
 def _baseline_summary_row(project_root: Path, alias: str, seed: int) -> Any:
     import pandas as pd
 
@@ -1347,7 +1498,7 @@ def _register_baseline_checkpoint(
     *,
     project_root: Path,
     replace_alias: bool,
-) -> None:
+) -> tuple[object, object | None]:
     from bone_cancer_ai.artifacts.registry import promote_checkpoint, resolve_checkpoint
 
     metrics = _strict_json(run_dir / "metrics.json")
@@ -1355,6 +1506,12 @@ def _register_baseline_checkpoint(
     if not isinstance(validation, Mapping) or isinstance(validation.get("AUROC"), bool):
         raise ValueError("baseline validation AUROC is missing")
     selected_alias = _selected_checkpoint_alias(str(record["model"]))
+    try:
+        previous = resolve_checkpoint(project_root, selected_alias)
+    except ValueError as error:
+        if "is not registered" not in str(error):
+            raise
+        previous = None
     promoted = promote_checkpoint(
         project_root,
         alias=selected_alias,
@@ -1373,6 +1530,7 @@ def _register_baseline_checkpoint(
     )
     if resolve_checkpoint(project_root, selected_alias) != promoted:
         raise ValueError(f"checkpoint alias {selected_alias!r} did not resolve after promotion")
+    return promoted, previous
 
 
 def _validated_phase5_runs(project_root: Path) -> list[tuple[str, Path, Any]]:
@@ -1417,13 +1575,26 @@ def validate_phase5_artifacts(project_root: Path = PROJECT_ROOT) -> dict[str, ob
     return {"models": 4, "runs": 4, "status": "valid"}
 
 
-def refresh_phase5_registry(project_root: Path = PROJECT_ROOT) -> dict[str, object]:
+def refresh_phase5_registry(
+    project_root: Path = PROJECT_ROOT,
+    *,
+    validation_dependencies: CheckpointValidationDependencies | None = None,
+) -> dict[str, object]:
     """Validate and register all four selected Phase 5 checkpoints without training."""
 
     root = Path(project_root).resolve()
+    checkpoint_validation = (
+        validation_dependencies or _default_checkpoint_validation_dependencies()
+    )
     aliases: list[str] = []
-    for model, run_dir, _ in _validated_phase5_runs(root):
+    for model, run_dir, summary_row in _validated_phase5_runs(root):
         record = _load_yaml(run_dir / "config.yaml", name="resolved run config")
+        _validate_selected_checkpoint(
+            run_dir,
+            record,
+            summary_row,
+            dependencies=checkpoint_validation,
+        )
         _register_baseline_checkpoint(
             run_dir,
             record,

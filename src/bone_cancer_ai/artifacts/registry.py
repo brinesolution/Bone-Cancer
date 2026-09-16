@@ -162,6 +162,40 @@ def resolve_checkpoint(project_root: Path, alias: str) -> CheckpointRecord:
     return record
 
 
+def restore_checkpoint_alias(
+    project_root: Path,
+    *,
+    alias: str,
+    expected_current: CheckpointRecord,
+    previous: CheckpointRecord | None,
+) -> None:
+    """Rollback one alias only if it still identifies the expected promotion."""
+
+    root = Path(project_root).resolve()
+    _validate_alias(alias)
+    if expected_current.alias != alias or (previous is not None and previous.alias != alias):
+        raise ValueError("rollback records must match the requested alias")
+    registry_path = root / _REGISTRY_RELATIVE_PATH
+    with _registry_lock(root):
+        registry = _load_registry(root, registry_path)
+        current_raw = registry.get(alias)
+        if current_raw is None:
+            raise ValueError("checkpoint alias changed before rollback")
+        current = _record_from_mapping(root, current_raw)
+        _verify_checkpoint(root, current)
+        if current != expected_current:
+            raise ValueError("checkpoint alias changed before rollback")
+        if previous is None:
+            del registry[alias]
+        else:
+            _verify_checkpoint(root, previous)
+            registry[alias] = previous.as_dict()
+        if registry:
+            _write_registry(registry_path, registry)
+        else:
+            registry_path.unlink(missing_ok=True)
+
+
 def _make_record(
     *,
     root: Path,
