@@ -4,19 +4,19 @@
 Reusable research pipeline.
 
 ## Files
-__init__.py: version; utils/: environment/config/source safety; data/: audit, leakage control, preprocessing and loaders; annotations/: review, revisions, LabelMe conversion and validation. Models/losses/training/evaluation/explainability/inference remain future phases.
+__init__.py: version; utils/: safety; data/: audit/loaders; annotations/: review; models/losses/training/: HOSP and baselines; optimization/: Phase 8 contracts, execution, reuse and frozen loading.
 
 ## Inputs
 Config, future verified manifests and tensors.
 
 ## Outputs
-Verified manifests, loaders and local annotation artifacts; model outputs Not run.
+Verified manifests/loaders, model runs, frozen configs and checksum-bound selections.
 
 ## Main Libraries
 See utils/README.md for actual APIs.
 
 ## Important Functions / Classes
-Package imports do not instantiate networks or train.
+Package imports do not instantiate networks or train; entry points call reusable modules.
 
 ## Theory
 Module boundaries separate data integrity, model computation and evaluation.
@@ -25,4 +25,4 @@ Module boundaries separate data integrity, model computation and evaluation.
 python -c "import bone_cancer_ai; print(bone_cancer_ai.__version__)"
 
 ## Notes
-Do not edit generated records manually. Keep original dataset files untouched. Future-phase scaffolds are not completed functionality; update this README when implementation becomes active.
+Do not edit generated records manually. Keep original dataset files untouched.

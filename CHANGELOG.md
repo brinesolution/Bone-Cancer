@@ -1,5 +1,7 @@
 # Changelog
 
+2026-09-17 — Completed validation-only Phase 8 data screening, 10-trial tuning and supported HOSP ablations; froze B2 at validation AUROC 0.958522 with reusable checksum-verified artifacts.
+
 2026-09-16 — Added checksum-backed selected-checkpoint aliases and validated Phase 5/7 rerun reuse.
 2026-09-16 — Added the versioned 6,324-image fit/validation cache with strict integrity checks and dynamic augmentation.
 

@@ -4,17 +4,17 @@ Phase completed:
 Phase 8 — Optimization, Ablations and Accuracy Improvement
 
 Important outputs:
-- `experiments/optimization/hosp_bonenet/phase8-b8b362800417`
+- `experiments/optimization/hosp_bonenet/phase8-5e55d4bddd5b`
 - `configs/hosp_bonenet_phase8_final.yaml`
 - `artifacts/metrics/hosp_ablation.csv`
 - alias `hosp_bonenet.phase8.selected`
 
 Tests:
-- PASS — 440 pytest tests
+- PASS — 445 pytest tests
 - PASS — Ruff, compileall, pip check, CUDA/AMP
 - PASS — completed-run reuse and bundle/checksum validation
 - PASS — frozen CUDA load/forward and source preservation
-- PENDING — final independent review response
+- CLEAN — independent Phase 8 code/artifact review
 
 Important result:
 - B2 selected; validation AUROC/AUPRC 0.958522/0.964397

@@ -88,5 +88,23 @@
       "planned_phase": 9,
       "status": "not_run"
     }
+  },
+  "hosp_bonenet.phase8.selected": {
+    "alias": "hosp_bonenet.phase8.selected",
+    "checkpoint_path": "artifacts/checkpoints/c24ed27c83c00aba245d2e28d7a39c3cd9fb027b311049625e3c915b0a711ec5.pt",
+    "checkpoint_sha256": "c24ed27c83c00aba245d2e28d7a39c3cd9fb027b311049625e3c915b0a711ec5",
+    "configuration_fingerprint": "0a6d5d3dbf8ef6e1a76b0d57e13b9bde725c9ed1ef5029ed443d878fdeac9b7b",
+    "model_family": "hosp_bonenet",
+    "phase": "phase_8",
+    "selected_metric": {
+      "name": "AUROC",
+      "split": "val",
+      "value": 0.9585224106360959
+    },
+    "source_run": "experiments/optimization/hosp_bonenet/phase8-5e55d4bddd5b",
+    "test_status": {
+      "planned_phase": 9,
+      "status": "not_run"
+    }
   }
 }

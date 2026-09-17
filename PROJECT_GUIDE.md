@@ -1,6 +1,6 @@
 # Project guide
 
-Phases 1–7 establish the environment, audited data, leakage-controlled loaders, annotation workflow, four baselines, the HOSP-BoneNet architecture, and its first complete validation-selected training run.
+Phases 1–8 establish the environment, audited data, leakage-controlled loaders, annotation workflow, four baselines, HOSP-BoneNet training, and validation-only optimization.
 
 ## 1. Project Overview
 
@@ -102,13 +102,15 @@ Pending calibration data and trained models. Hold out a grouped subset of offici
 
 The shared trainer uses AdamW, cosine scheduling, warmup, AMP, gradient clipping and validation-AUROC checkpointing. Phase 7 ran binary Stage A for 35 epochs with early stopping, skipped B/C because their verified labels are unavailable, then fine-tuned Stage D for 10 epochs at 1e-5. Only fit_train and validation were constructed; test was not accessed.
 
+Phase 8 screened balance strategy, mild augmentation, 384/512 input size and cache throughput before a compact 10-trial Optuna search. Supported warm-start ablations compared B0 plain, B1 localization attention and B2 gated global-local fusion; unavailable concepts, supervised spatial grounding and hierarchy were omitted. B2 was frozen with 384-pixel cached inputs, weighted sampling, lr 3e-6, weight decay 1e-4 and dropout 0.3.
+
 ## 24. Checkpointing
 
-Each immutable run records config, environment, history, `best.pt`, `last.pt`, predictions and metrics. A checksum-backed registry promotes selected checkpoints under stable aliases for the four baselines and HOSP-BoneNet. Exact completed runs are reused; interrupted HOSP runs resume; only `--force-new-run` retrains. The selected Phase 7 artifact remains Stage D epoch 6 (validation AUROC 0.958355). Test evaluation remains reserved for Phase 9.
+Each immutable run records config, environment, history, `best.pt`, `last.pt`, predictions and metrics. A checksum-backed registry promotes selected checkpoints under stable aliases for the four baselines and HOSP-BoneNet. Exact completed runs are reused; interrupted stages resume; only `--force-new-run` starts fresh. Phase 8 publishes `hosp_bonenet.phase8.selected` plus a strict frozen inference manifest. Test evaluation remains reserved for Phase 9.
 
 ## 25. Evaluation Metrics
 
-Seed-42 test results are: DenseNet121 AUROC 0.96315/AUPRC 0.96519; EfficientNet-B3 0.97810/0.97612; ConvNeXt-Tiny 0.96401/0.96394; Swin-Tiny 0.96517/0.96355. See `artifacts/metrics/baseline_summary.csv` for balanced accuracy, F1, sensitivity, specificity, MCC, parameters and measured latency. These are single-split research results; multi-seed and clinical validation are Pending/Unavailable.
+Seed-42 test results are: DenseNet121 AUROC 0.96315/AUPRC 0.96519; EfficientNet-B3 0.97810/0.97612; ConvNeXt-Tiny 0.96401/0.96394; Swin-Tiny 0.96517/0.96355. Phase 8 HOSP validation AUROC/AUPRC is 0.958522/0.964397; its test result is Not run. See the generated baseline and ablation CSVs for other metrics. These are single-split research results; multi-seed and clinical validation are Pending/Unavailable.
 
 ## 26. Explainability
 
@@ -116,7 +118,7 @@ Pending Phase 9. Generate lesion probabilities, Grad-CAM/Grad-CAM++ and supporte
 
 ## 27. Inference Pipeline
 
-Baseline checkpoint loading and prediction are implemented. The HOSP-BoneNet inference, calibration, rejection and overlay pipeline remains pending Phase 9/10.
+Baseline loading and prediction plus strict frozen Phase 8 HOSP loading are implemented. Calibration, rejection and overlay generation remain Phase 9/10 work.
 
 ## 28. Streamlit Demo
 
@@ -124,7 +126,7 @@ Pending Phase 10. Upload, validate, predict, show calibrated confidence/abstenti
 
 ## 29. How to Run Each Phase
 
-Phase 1 environment: `python scripts/00_verify_environment.py`. Phase 2 audit: scripts 01–03. Phase 3 data: scripts 04–06. Phase 4 annotations: scripts 07–08. Phase 5 baselines: script 09. Phase 7 HOSP: `python scripts/10_train_hosp_bonenet.py --config configs/hosp_bonenet.yaml`; validate an existing run with `--validate-bundle <run_dir>`. Always use `.venv` and run pytest, Ruff and compileall after changes.
+Phase 1 environment: script 00. Phase 2 audit: scripts 01–03. Phase 3 data: scripts 04–06. Phase 4 annotations: scripts 07–08. Phase 5 baselines: script 09. Phase 7 HOSP: script 10. Phase 8: `.venv\Scripts\python.exe scripts\11_tune_hosp_bonenet.py --config configs\optimization.yaml`; unchanged completed runs validate and reuse automatically. Always use `.venv` and run pytest, Ruff and compileall after changes.
 
 ## 30. Common Errors and Troubleshooting
 

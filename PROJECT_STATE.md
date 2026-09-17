@@ -1,8 +1,8 @@
 # Project state
 
-Current phase: Phase 7 — Full Training and Checkpoint Selection COMPLETE
-Completed phases: 1–7
-Next phase: Phase 8 — Optimization and Accuracy Improvement
+Current phase: Phase 8 — Optimization, Ablations and Accuracy Improvement COMPLETE
+Completed phases: 1–8
+Next phase: Phase 9 — Final Evaluation, Explainability and Visual QA
 
 ## Environment
 
@@ -15,33 +15,31 @@ Next phase: Phase 8 — Optimization and Accuracy Improvement
 ## Dataset
 
 - Immutable source: `dataset/Main`
-- Source images/labels: 12,557; class 0=`normal` 6,827, class 1=`bone_tumour` 5,730
-- Source snapshot: 12,560 files, 1,120,418,007 bytes; exact Phase 1 match after Phase 7
+- Source: 12,557 images; 0=`normal` 6,827, 1=`bone_tumour` 5,730
+- Source preservation: 12,560 files / 1,120,418,007 bytes; exact Phase 1 match after Phase 8
 - Derived splits: fit 4,871; calibration 857; validation 1,453; test 1,882
-- Split generation: `de64a489fff7202ec39d442e4b26a5a5c0d7e2c7db8ed7a8587601ef1cd28590`
-- Leakage: zero record/sample/group overlap; all split hashes preserved
-- Inputs: versioned 384×384 cache for fit_train/val; dynamic fit augmentation and ImageNet normalization
+- Leakage: zero record/sample/group overlap; split generation unchanged
+- Inputs: verified 384×384 fit/validation cache; dynamic fit augmentation
 
 ## Supervision gates
 
 - Verified training supervision: binary only
-- Stages B/C skipped: spatial labels are not released; subtype/concept labels are unavailable
-- Human project reviews: 0; clinical verification: Unavailable
-- Optional subtype, risk, concept and supervised mask heads remain disabled
+- B3 concepts, B4 supervised spatial grounding and B5 hierarchy were not run
+- Subtype, risk, concepts and supervised masks remain disabled
+- Human/clinical verification: Unavailable
 
-## Phase 7 training
+## Phase 8 result
 
-- Run: `experiments/hosp_bonenet/20260912T121852779982Z-a371f643`
-- Input: fit_train only; checkpoint selection: validation AUROC only; test: Not run
-- Stage A: 35 epochs, early stopped; best epoch 27; validation AUROC 0.956851
-- Stage D: 10 epochs at 1e-5; selected epoch 6; validation AUROC 0.958355
-- Selected validation AUPRC: 0.964236; F1: 0.902389; balanced accuracy: 0.901817
-- Selected confusion matrix: TN=649, FP=62, FN=81, TP=661
-- Selected checkpoint: `stage_D/best.pt`
-- SHA-256: `a6380739e6527a085434866c83a135b86ca118e82f8d5a8bf75d934d25ce268e`
-- Stage A/D best-checkpoint logits, targets and sample IDs reload exactly
-- Stage A resumed from intact epoch-29 state after a host-memory interruption; provenance is recorded
-- Training histories and curves exist for both executed stages; no unexplained NaNs
+- Run: `experiments/optimization/hosp_bonenet/phase8-5e55d4bddd5b`
+- Parent: `hosp_bonenet.phase7.selected`
+- Data: 384, current mild augmentation, weighted sampler, verified cache
+- Optuna: 10 terminal trials; 4 complete, 6 pruned; trial 1 selected
+- Tuned: lr 3e-6, weight decay 1e-4, warmup 0, dropout 0.3, label smoothing 0
+- Supported warm-start ablations: B0 plain, B1 localization attention, B2 gated global-local fusion
+- Selected architecture: B2; best confirmation epoch: 2/3
+- Validation AUROC/AUPRC/F1: 0.958522 / 0.964397 / 0.897196
+- Validation balanced accuracy/ECE/Brier: 0.893758 / 0.103580 / 0.103251
+- Test: Not run; reserved for Phase 9
 
 ## Latest models
 
@@ -49,42 +47,41 @@ Next phase: Phase 8 — Optimization and Accuracy Improvement
 - EfficientNet-B3 test AUROC/AUPRC: 0.97810 / 0.97612
 - ConvNeXt-Tiny test AUROC/AUPRC: 0.96401 / 0.96394
 - Swin-Tiny test AUROC/AUPRC: 0.96517 / 0.96355
-- HOSP-BoneNet validation AUROC/AUPRC: 0.95835 / 0.96424; test: Not run
+- HOSP-BoneNet Phase 8 validation AUROC/AUPRC: 0.958522 / 0.964397; test Not run
 
 ## Artifact reuse
 
-- Registry: five SHA-256-verified selected aliases (four Phase 5 baselines + Phase 7 HOSP)
-- Reruns: exact completed runs reuse automatically; interrupted HOSP runs resume; `--force-new-run` retrains
-- Cache: 6,324 PNGs / 383,787,525 bytes; fit_train 4,871 + val 1,453
-- Cache rerun: 6,324 reused, 0 built/rebuilt/failed; PNG timestamps and sizes unchanged
+- Selected alias: `hosp_bonenet.phase8.selected`
+- Checkpoint SHA-256: `c24ed27c83c00aba245d2e28d7a39c3cd9fb027b311049625e3c915b0a711ec5`
+- Frozen config: `configs/hosp_bonenet_phase8_final.yaml`
+- Exact completed reruns validate and reuse; interrupted stages resume; `--force-new-run` starts fresh
+- Registry and frozen loader reject changed or checksum-invalid artifacts
 
 ## Verification
 
-- `pytest -q`: 411 passed
-- Ruff, compileall, pip check, environment/CUDA check: PASS
-- Run-bundle validation and both-stage exact checkpoint reload: PASS
-- Registry refresh, five no-training reruns, cache/DataModule validation: PASS
-- Source and split preservation: PASS
-- Independent registry/cache reviews: CLEAN
+- `pytest -q`: 445 passed
+- Ruff, compileall, pip check, CUDA/AMP environment check: PASS
+- Completed-run reuse and full bundle validation: PASS
+- Frozen checkpoint strict CUDA load/forward: PASS
+- Source preservation and absence of test artifacts: PASS
+- Independent code review: CLEAN
 
 ## Important paths
 
-- Training config: `configs/hosp_train.yaml`
-- Model config: `configs/hosp_bonenet.yaml`
-- Trainer: `src/bone_cancer_ai/training/trainer.py`
-- Entry point: `scripts/10_train_hosp_bonenet.py`
-- Selected run: `experiments/hosp_bonenet/20260912T121852779982Z-a371f643`
+- Phase 8 config: `configs/optimization.yaml`
+- Frozen config: `configs/hosp_bonenet_phase8_final.yaml`
+- Runner: `scripts/11_tune_hosp_bonenet.py`
+- Core: `src/bone_cancer_ai/optimization/`
+- Run: `experiments/optimization/hosp_bonenet/phase8-5e55d4bddd5b`
+- Ablations: `artifacts/metrics/hosp_ablation.csv`
 - Registry: `artifacts/checkpoints/registry.json`
-- Cache index: `workspace/cache/resized/cache_index.csv`
-- Preservation evidence: `logs/source_after_phase7.json`, `logs/phase7_split_preservation.json`
 
 ## Open issues
 
-- Test evaluation is reserved for Phase 9.
-- Optional task supervision remains gated by unavailable/unreleased verified labels.
+- Test evaluation, explainability galleries and statistical intervals belong to Phase 9.
 - Classification-guided lesion maps have no claimed segmentation accuracy.
-- Multi-seed and clinical validation are Pending/Unavailable.
+- Multi-seed and clinical validation remain Pending/Unavailable.
 
 ## Next action
 
-- Run Phase 8 optimization from `hosp_bonenet.phase7.selected`, reusing the verified cache. Preserve test isolation and use SOL.
+- Use ASTRA for Phase 9. Load `hosp_bonenet.phase8.selected`; evaluate frozen models once on test and generate explainability/QA artifacts.

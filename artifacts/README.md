@@ -10,13 +10,13 @@ checkpoints/: learned weights; metrics/: real metrics; predictions/: outputs; fi
 Future completed runs and frozen evaluation config.
 
 ## Outputs
-Phase 2 dataset audit figures exist under `figures/`. No model artifacts or performance metrics exist.
+Audit figures, checksum-addressed selected checkpoints, baseline metrics and Phase 8 HOSP ablations.
 
 ## Main Libraries
-Matplotlib/Pillow for current audit figures; later producers remain pending.
+PyTorch, Pandas, Matplotlib and Pillow.
 
 ## Important Functions / Classes
-`save_audit_figures` is active. Model/evaluation producers are implemented in later phases.
+The checkpoint registry verifies SHA-256 aliases; training/evaluation modules publish generated metrics.
 
 ## Theory
 Artifact claims must be backed by executed code.

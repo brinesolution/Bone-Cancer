@@ -4,7 +4,8 @@ Purpose: Immutable, uniquely named outputs from executed model runs.
 
 Folders:
 - `baselines/` — four Phase 5 model families and run bundles.
-- `hosp_bonenet/`, `ablations/`, `tuning/` — later-phase outputs.
+- `hosp_bonenet/` — Phase 7 training bundles.
+- `optimization/` — resumable Phase 8 screens, tuning, ablations and frozen selection.
 
 Each complete run contains config, environment/Git evidence, history, best/last checkpoints, predictions, confusion matrix, metrics and notes.
 
