@@ -1,10 +1,11 @@
 status: pending_phase_10
-evaluation_status: pending_phase_9
+evaluation_status: phase_9_complete
 data_config: data.yaml
 model_config: hosp_bonenet.yaml
-checkpoint_alias: hosp_bonenet.phase7.selected
+checkpoint_alias: hosp_bonenet.phase8.selected
 checkpoint_registry: artifacts/checkpoints/registry.json
 device: cuda
-binary_threshold: null
+binary_threshold: 0.5
 open_set_threshold: null
-conformal_calibration: null
+conformal_calibration: artifacts/metrics/hosp_conformal_calibration.json
+metrics_path: artifacts/metrics/final_model_comparison.csv

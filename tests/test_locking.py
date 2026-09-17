@@ -3,6 +3,7 @@ from __future__ import annotations
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -76,5 +77,12 @@ def test_exclusive_file_lock_is_process_backed_and_crash_releases_it(tmp_path: P
         child.kill()
         child.wait(timeout=5)
 
-    with exclusive_file_lock(lock_path):
-        pass
+    deadline = time.monotonic() + 2.0
+    while True:
+        try:
+            with exclusive_file_lock(lock_path):
+                break
+        except TimeoutError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.01)

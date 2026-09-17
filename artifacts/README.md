@@ -7,10 +7,10 @@ Model and evaluation outputs.
 checkpoints/: learned weights; metrics/: real metrics; predictions/: outputs; figures/: charts; explainability/: overlays; model_cards/: limitations.
 
 ## Inputs
-Future completed runs and frozen evaluation config.
+Completed runs and frozen evaluation configuration.
 
 ## Outputs
-Audit figures, checksum-addressed selected checkpoints, baseline metrics and Phase 8 HOSP ablations.
+Audit figures, checksum-addressed checkpoints, final metrics, statistical plots and explanations.
 
 ## Main Libraries
 PyTorch, Pandas, Matplotlib and Pillow.
@@ -22,7 +22,7 @@ The checkpoint registry verifies SHA-256 aliases; training/evaluation modules pu
 Artifact claims must be backed by executed code.
 
 ## Execution
-`python scripts/02_audit_dataset.py` for Phase 2 figures.
+Use the owning phase script; Phase 9 uses `scripts/12_evaluate.py`.
 
 ## Notes
 Do not edit generated artifacts manually or add fabricated results. Regenerate artifacts from recorded inputs/configs.

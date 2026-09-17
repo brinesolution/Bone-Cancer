@@ -11,7 +11,11 @@ from pathlib import Path
 import pytest
 
 from bone_cancer_ai.artifacts import registry as registry_module
-from bone_cancer_ai.artifacts.registry import promote_checkpoint, resolve_checkpoint
+from bone_cancer_ai.artifacts.registry import (
+    promote_checkpoint,
+    resolve_checkpoint,
+    update_checkpoint_test_status,
+)
 
 
 def _promotion_details(
@@ -154,6 +158,44 @@ def test_repeating_the_same_promotion_is_idempotent(tmp_path: Path) -> None:
 
     assert second == first
     assert registry_path.read_bytes() == registry_before
+
+
+def test_test_status_update_preserves_checkpoint_identity_and_checks_digest(
+    tmp_path: Path,
+) -> None:
+    project_root = tmp_path / "project"
+    source = _checkpoint(project_root)
+    original = promote_checkpoint(
+        project_root,
+        alias="hosp_bonenet.phase7.selected",
+        checkpoint_path=source,
+        **_promotion_details(),
+    )
+    status = {
+        "status": "complete",
+        "phase": 9,
+        "evaluation_run": "experiments/evaluation/phase9-test",
+        "predictions_sha256": "b" * 64,
+    }
+
+    updated = update_checkpoint_test_status(
+        project_root,
+        alias=original.alias,
+        expected_checkpoint_sha256=original.checkpoint_sha256,
+        test_status=status,
+    )
+
+    assert updated.test_status == status
+    assert updated.checkpoint_sha256 == original.checkpoint_sha256
+    assert updated.checkpoint_path == original.checkpoint_path
+    assert resolve_checkpoint(project_root, original.alias) == updated
+    with pytest.raises(ValueError, match="changed"):
+        update_checkpoint_test_status(
+            project_root,
+            alias=original.alias,
+            expected_checkpoint_sha256="c" * 64,
+            test_status=status,
+        )
 
 
 def test_alias_resolution_rejects_a_tampered_promoted_checkpoint(tmp_path: Path) -> None:

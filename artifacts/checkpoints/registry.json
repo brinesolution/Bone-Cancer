@@ -103,8 +103,10 @@
     },
     "source_run": "experiments/optimization/hosp_bonenet/phase8-5e55d4bddd5b",
     "test_status": {
-      "planned_phase": 9,
-      "status": "not_run"
+      "evaluation_run": "experiments/evaluation/phase9-2a9cd712f0e1",
+      "phase": 9,
+      "predictions_sha256": "44b4befad823c55eb2ed0691713208560c88a1cedc2823ec0664a3b184fe564e",
+      "status": "complete"
     }
   }
 }

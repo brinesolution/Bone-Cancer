@@ -1,28 +1,30 @@
 # src/bone_cancer_ai/explainability
 
 ## Purpose
-Spatial explanations and visual error galleries.
+Spatial debugging overlays and outcome/uncertainty galleries.
 
 ## Files
-gradcam.py: gradcam scaffold; overlays.py: overlays scaffold; concept_maps.py: concept maps scaffold; gallery.py: gallery scaffold.
+- `gradcam.py` — class-specific activation maps.
+- `overlays.py` — denormalization and heatmap blending.
+- `gallery.py` — deterministic TP/TN/FP/FN/rejected selection.
 
 ## Inputs
 frozen model/images and supported outputs.
 
 ## Outputs
-Pending Phase 9: overlays and failure cases.
+Phase 9 galleries under `artifacts/explainability/phase9/`.
 
 ## Main Libraries
-None used by current docstring-only modules.
+PyTorch, NumPy, Pandas and Matplotlib.
 
 ## Important Functions / Classes
-Implementation and interfaces are Pending Phase 9; __init__.py is a package marker.
+`GradCAM`, `overlay_heatmap`, `select_gallery_cases`.
 
 ## Theory
 Attention is not ground truth; inspect text-marker shortcuts.
 
 ## Execution
-Pending Phase 9; see root guide.
+`.venv\Scripts\python.exe scripts\12_evaluate.py --config configs\evaluation.yaml`
 
 ## Notes
-Do not edit generated records manually. Keep original dataset files untouched. Future-phase scaffolds are not completed functionality; update this README when implementation becomes active.
+Maps are qualitative only; Phase 9 found marker/border attention and saturated lesion maps.

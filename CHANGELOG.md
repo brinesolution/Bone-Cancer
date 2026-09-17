@@ -1,5 +1,7 @@
 # Changelog
 
+2026-09-17 — Completed one-time frozen Phase 9 test comparison, bootstrap intervals, conformal uncertainty, Grad-CAM/lesion galleries and technical visual QA.
+
 2026-09-17 — Completed validation-only Phase 8 data screening, 10-trial tuning and supported HOSP ablations; froze B2 at validation AUROC 0.958522 with reusable checksum-verified artifacts.
 
 2026-09-16 — Added checksum-backed selected-checkpoint aliases and validated Phase 5/7 rerun reuse.

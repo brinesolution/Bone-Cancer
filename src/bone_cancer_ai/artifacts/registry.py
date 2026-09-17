@@ -202,6 +202,45 @@ def resolve_checkpoint(project_root: Path, alias: str) -> CheckpointRecord:
     return record
 
 
+def update_checkpoint_test_status(
+    project_root: Path,
+    *,
+    alias: str,
+    expected_checkpoint_sha256: str,
+    test_status: Mapping[str, Any],
+) -> CheckpointRecord:
+    """Atomically update test provenance without changing checkpoint identity."""
+    root = Path(project_root).resolve()
+    _validate_alias(alias)
+    expected_digest = _validate_sha256(
+        expected_checkpoint_sha256, name="expected_checkpoint_sha256"
+    )
+    registry_path = root / _REGISTRY_RELATIVE_PATH
+    with _registry_lock(root):
+        registry = _load_registry(root, registry_path)
+        if alias not in registry:
+            raise ValueError(f"checkpoint alias {alias!r} is not registered")
+        current = _record_from_mapping(root, registry[alias])
+        _verify_checkpoint(root, current)
+        if current.checkpoint_sha256 != expected_digest:
+            raise ValueError("checkpoint alias changed before test-status update")
+        updated = _make_record(
+            root=root,
+            alias=current.alias,
+            model_family=current.model_family,
+            phase=current.phase,
+            source_run=_project_relative_path(root, current.source_run, name="source_run"),
+            selected_metric=current.selected_metric,
+            checkpoint_path=Path(current.checkpoint_path),
+            checkpoint_sha256=current.checkpoint_sha256,
+            configuration_fingerprint=current.configuration_fingerprint,
+            test_status=test_status,
+        )
+        registry[alias] = updated.as_dict()
+        _write_registry(registry_path, registry)
+        return updated
+
+
 def restore_checkpoint_alias(
     project_root: Path,
     *,

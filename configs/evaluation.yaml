@@ -1,0 +1,26 @@
+phase: 9
+output_root: experiments/evaluation
+hosp_alias: hosp_bonenet.phase8.selected
+baseline_aliases:
+  DenseNet121: baseline.densenet121.phase5.selected
+  EfficientNet-B3: baseline.efficientnet_b3.phase5.selected
+  ConvNeXt-Tiny: baseline.convnext_tiny.phase5.selected
+  Swin-Tiny: baseline.swin_tiny.phase5.selected
+data_config: configs/data.yaml
+schema_path: workspace/annotations/label_schema.yaml
+split_dir: workspace/splits
+device: cuda
+amp: true
+batch_size: 8
+num_workers: 0
+threshold: 0.5
+bootstrap:
+  resamples: 1000
+  confidence: 0.95
+  seed: 42
+conformal:
+  alpha: 0.10
+gallery:
+  per_category: 4
+latency_warmup: 10
+latency_repetitions: 50

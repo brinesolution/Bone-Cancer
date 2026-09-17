@@ -1,39 +1,32 @@
 # Phase handoff
 
-Phase completed:
-Phase 8 — Optimization, Ablations and Accuracy Improvement
+Phase completed: Phase 9 — Final Evaluation, Comparison, Explainability and Visual QA
 
 Important outputs:
-- `experiments/optimization/hosp_bonenet/phase8-5e55d4bddd5b`
-- `configs/hosp_bonenet_phase8_final.yaml`
-- `artifacts/metrics/hosp_ablation.csv`
-- alias `hosp_bonenet.phase8.selected`
+- `experiments/evaluation/phase9-2a9cd712f0e1`
+- `artifacts/metrics/final_model_comparison.csv`
+- `artifacts/figures/roc_curves.png`, `pr_curves.png`, `calibration_curves.png`
+- `artifacts/figures/confusion_matrices/`
+- `artifacts/explainability/phase9/`
+- sealed alias `hosp_bonenet.phase8.selected`
 
 Tests:
-- PASS — 445 pytest tests
-- PASS — Ruff, compileall, pip check, CUDA/AMP
-- PASS — completed-run reuse and bundle/checksum validation
-- PASS — frozen CUDA load/forward and source preservation
-- CLEAN — independent Phase 8 code/artifact review
+- PASS — 462 pytest tests; 126 targeted after lint-only baseline edit
+- PASS — Ruff, compileall, pip check and CUDA checkpoint reload/forward
+- PASS — one-time test ledger, exact reuse and changed-config rejection
+- PASS_WITH_LIMITATIONS — technical visual QA
+- PASS — independent review CLEAN
 
-Important result:
-- B2 selected; validation AUROC/AUPRC 0.958522/0.964397
-- 10 Optuna trials; test Not run
+Important result: HOSP AUROC/AUPRC 0.965033/0.965161; EfficientNet-B3 leads at 0.978097/0.976115; HOSP test count is exactly one.
 
-Outstanding issue:
-- Phase 9 owns one-time test evaluation, explainability and visual QA.
+Outstanding issue: explanations are qualitative; external/OOD, multi-seed and clinical validation unavailable.
 
-Do not rerun:
-- Phase 8 training unless verified inputs/config/code change; default command reuses.
+Do not rerun: test inference for the current HOSP checkpoint; script 12 verifies and reuses sealed predictions.
 
-Next model:
-ASTRA
+Next model: LUNA
 
-Next phase:
-Phase 9 — Final Evaluation, Explainability and Visual QA
+Next phase: Phase 10 — Integration, Reproducibility and Team Documentation
 
-Start command:
-`Get-Content PROJECT_STATE.md; Get-Content scripts\12_evaluate.py`
+Start command: `Get-Content PROJECT_STATE.md; Get-Content configs\inference.yaml`
 
-Resume from:
-`PROJECT_STATE.md`
+Resume from: `PROJECT_STATE.md`

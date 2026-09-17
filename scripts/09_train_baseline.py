@@ -491,7 +491,7 @@ def _validate_data_config(data: Mapping[str, Any]) -> None:
         if value is not None and (
             not isinstance(value, list)
             or len(value) != 2
-            or any(isinstance(item, bool) or not isinstance(item, (int, float)) for item in value)
+            or any(isinstance(item, bool) or not isinstance(item, int | float) for item in value)
         ):
             raise ValueError(f"{key} must be a two-number list")
 
@@ -1380,11 +1380,11 @@ def _checkpoint_history_matches(
             return False
         for key, expected_value in expected_row.items():
             actual_value = actual_row[key]
-            if isinstance(expected_value, (int, float)) and not isinstance(
+            if isinstance(expected_value, int | float) and not isinstance(
                 expected_value, bool
             ):
                 if isinstance(actual_value, bool) or not isinstance(
-                    actual_value, (int, float)
+                    actual_value, int | float
                 ):
                     return False
                 if not math.isclose(
@@ -1438,7 +1438,7 @@ def _validate_selected_checkpoint(
     if metadata.get("selection_metric") != "AUROC":
         raise ValueError("checkpoint selection metric does not match bundle metadata")
     checkpoint_value = metadata.get("selection_value")
-    if isinstance(checkpoint_value, bool) or not isinstance(checkpoint_value, (int, float)):
+    if isinstance(checkpoint_value, bool) or not isinstance(checkpoint_value, int | float):
         raise ValueError("checkpoint selection value is invalid")
     if not math.isclose(
         float(checkpoint_value), selected_value, rel_tol=1e-12, abs_tol=1e-12

@@ -1,16 +1,19 @@
 # Evaluation
 
-Purpose: Honest binary metrics, latency measurement and atomic reports.
+Purpose: Frozen binary evaluation, uncertainty intervals and comparison figures.
 
 Files:
-- `classification.py` — AUROC, AUPRC, threshold metrics, Brier and ECE.
-- `reports.py` — JSON/CSV writers, confusion matrices, latency and summary updates.
-- Other modules — later segmentation, calibration and open-set work.
+- `classification.py`, `bootstrap.py` — metrics and stratified confidence intervals.
+- `calibration.py`, `comparison.py` — uncertainty helpers and required plots.
+- `phase9.py` — one-time HOSP test ledger, comparison and gallery workflow.
+- `reports.py` — atomic JSON/CSV persistence and latency measurement.
 
 Main libraries: PyTorch, NumPy, Pandas, scikit-learn.
 
-Flow: saved logits/targets → fixed threshold 0.5 → metrics and reports.
+Flow: frozen/saved predictions → cohort checks → metrics/CIs → plots and explanations.
 
-Validate: `\.venv\Scripts\python.exe scripts\09_train_baseline.py --validate-artifacts`
+Run: `.venv\Scripts\python.exe scripts\12_evaluate.py --config configs\evaluation.yaml`
 
-Undefined metrics remain null; never enter unavailable or estimated results.
+Finalize reviewed galleries: append `--finalize-visual-qa`.
+
+The test ledger fails closed on changed contracts or checksums and prevents repeat evaluation.

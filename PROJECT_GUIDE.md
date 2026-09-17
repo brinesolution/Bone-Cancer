@@ -1,6 +1,6 @@
 # Project guide
 
-Phases 1–8 establish the environment, audited data, leakage-controlled loaders, annotation workflow, four baselines, HOSP-BoneNet training, and validation-only optimization.
+Phases 1–9 establish the environment, audited data, leakage-controlled loaders, annotation workflow, trained models, validation-only optimization, and frozen test evaluation.
 
 ## 1. Project Overview
 
@@ -106,19 +106,19 @@ Phase 8 screened balance strategy, mild augmentation, 384/512 input size and cac
 
 ## 24. Checkpointing
 
-Each immutable run records config, environment, history, `best.pt`, `last.pt`, predictions and metrics. A checksum-backed registry promotes selected checkpoints under stable aliases for the four baselines and HOSP-BoneNet. Exact completed runs are reused; interrupted stages resume; only `--force-new-run` starts fresh. Phase 8 publishes `hosp_bonenet.phase8.selected` plus a strict frozen inference manifest. Test evaluation remains reserved for Phase 9.
+Each immutable run records its full config, input checksums, predictions and metrics. The checksum-backed registry exposes selected checkpoints under stable aliases. Phase 9 seals HOSP test predictions in a one-evaluation ledger; exact reruns verify and reuse them, while changed contracts fail closed. Registry publication requires a completed technical visual-QA record.
 
 ## 25. Evaluation Metrics
 
-Seed-42 test results are: DenseNet121 AUROC 0.96315/AUPRC 0.96519; EfficientNet-B3 0.97810/0.97612; ConvNeXt-Tiny 0.96401/0.96394; Swin-Tiny 0.96517/0.96355. Phase 8 HOSP validation AUROC/AUPRC is 0.958522/0.964397; its test result is Not run. See the generated baseline and ablation CSVs for other metrics. These are single-split research results; multi-seed and clinical validation are Pending/Unavailable.
+Frozen seed-42 test AUROC/AUPRC: DenseNet121 0.96315/0.96519; EfficientNet-B3 0.97810/0.97612; ConvNeXt-Tiny 0.96401/0.96394; Swin-Tiny 0.96517/0.96355; HOSP-BoneNet 0.96503/0.96516. HOSP AUROC 95% bootstrap CI is 0.95706–0.97211. EfficientNet-B3 leads this split. Results are single-seed and single-split; clinical and multi-seed validation are unavailable.
 
 ## 26. Explainability
 
-Pending Phase 9. Generate lesion probabilities, Grad-CAM/Grad-CAM++ and supported concept overlays. Inspect anatomy, padding, burned-in text, failures and uncertainty. Grad-CAM is an explanation, never ground-truth segmentation.
+Phase 9 generated lesion-head spatial-attention and Grad-CAM galleries for TP/TN/FP/FN and conformal-rejected cases. Geometry is aligned and no inversion/broken rendering was observed. Spatial maps are broadly saturated, while some Grad-CAM maps emphasize markers, borders, scale bars or acquisition artifacts. Composite radiographs also confound attention. These outputs are qualitative debugging aids, not lesion probabilities, verified segmentations or clinical explanations; subtype/concept maps remain unavailable.
 
 ## 27. Inference Pipeline
 
-Baseline loading and prediction plus strict frozen Phase 8 HOSP loading are implemented. Calibration, rejection and overlay generation remain Phase 9/10 work.
+Strict frozen loading, fixed threshold 0.5, entropy uncertainty and split-conformal sets are implemented. Calibration used 857 held-out samples; test coverage was 0.8943 at nominal 0.90, with four empty rejected sets. No verified OOD labels exist, so open-set performance remains unavailable.
 
 ## 28. Streamlit Demo
 
@@ -126,7 +126,7 @@ Pending Phase 10. Upload, validate, predict, show calibrated confidence/abstenti
 
 ## 29. How to Run Each Phase
 
-Phase 1 environment: script 00. Phase 2 audit: scripts 01–03. Phase 3 data: scripts 04–06. Phase 4 annotations: scripts 07–08. Phase 5 baselines: script 09. Phase 7 HOSP: script 10. Phase 8: `.venv\Scripts\python.exe scripts\11_tune_hosp_bonenet.py --config configs\optimization.yaml`; unchanged completed runs validate and reuse automatically. Always use `.venv` and run pytest, Ruff and compileall after changes.
+Phase 1 environment: script 00. Phase 2 audit: scripts 01–03. Phase 3 data: scripts 04–06. Phase 4 annotations: scripts 07–08. Phase 5 baselines: script 09. Phase 7 HOSP: script 10. Phase 8: script 11. Phase 9 runs with `.venv\Scripts\python.exe scripts\12_evaluate.py --config configs\evaluation.yaml`; after recording technical QA, publish with the same command plus `--finalize-visual-qa`. Exact reruns validate and reuse the sealed result. Always use `.venv` and run pytest, Ruff and compileall after changes.
 
 ## 30. Common Errors and Troubleshooting
 
