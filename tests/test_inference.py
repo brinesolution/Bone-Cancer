@@ -9,7 +9,7 @@ def test_inference_config_uses_phase9_frozen_outputs_for_phase10() -> None:
     config_path = Path(__file__).parents[1] / "configs" / "inference.yaml"
     config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
 
-    assert config["status"] == "pending_phase_10"
+    assert config["status"] == "phase10_ready"
     assert config["evaluation_status"] == "phase_9_complete"
     assert config["checkpoint_alias"] == "hosp_bonenet.phase8.selected"
     assert config["checkpoint_registry"] == "artifacts/checkpoints/registry.json"

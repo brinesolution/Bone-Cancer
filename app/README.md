@@ -1,28 +1,28 @@
 # app
 
 ## Purpose
-Research demonstration scaffold.
+Streamlit research demo for frozen HOSP-BoneNet inference.
 
 ## Files
-streamlit_app.py: future demo entry point; ui_helpers.py: future presentation helpers; assets/: static resources.
+`streamlit_app.py` — upload/predict/display/export flow; `ui_helpers.py` — pure display and overlay helpers; `assets/` — static resources.
 
 ## Inputs
-Future frozen checkpoint and user-provided radiograph.
+User-uploaded JPG/PNG plus the checksum-registered Phase 8 HOSP checkpoint.
 
 ## Outputs
-No inference results yet.
+Binary probability, confidence, entropy, conformal abstention, unverified spatial attention, Grad-CAM and JSON metadata.
 
 ## Main Libraries
-None in Phase 1; Streamlit installed for Phase 10.
+Streamlit, PyTorch, Pillow, NumPy and Matplotlib.
 
 ## Important Functions / Classes
-Interface functions are Pending Phase 10.
+`load_predictor`, `_decode_upload`, `_show_result`; model logic stays in `src/bone_cancer_ai/inference`.
 
 ## Theory
 Inference must not require/expose ground-truth labels.
 
 ## Execution
-Pending Phase 10; current app entry point reports pending status.
+`streamlit run app\streamlit_app.py`
 
 ## Notes
-Do not edit generated records manually. Keep original dataset files untouched. Future-phase scaffolds are not completed functionality; update this README when implementation becomes active.
+No ground-truth labels are shown. Subtype/concept/OOD outputs remain unavailable. Keep `dataset/Main` untouched.

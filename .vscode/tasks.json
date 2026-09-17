@@ -162,6 +162,46 @@
       ],
       "options": { "cwd": "${workspaceFolder}" },
       "problemMatcher": []
+    },
+    {
+      "label": "Audit dataset",
+      "type": "process",
+      "command": "${workspaceFolder}/.venv/Scripts/python.exe",
+      "args": ["scripts/02_audit_dataset.py", "--config", "configs/data.yaml"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": []
+    },
+    {
+      "label": "Launch annotation review",
+      "type": "process",
+      "command": "${workspaceFolder}/.venv/Scripts/python.exe",
+      "args": ["scripts/07_launch_annotation_tool.py"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": []
+    },
+    {
+      "label": "Train HOSP-BoneNet",
+      "type": "process",
+      "command": "${workspaceFolder}/.venv/Scripts/python.exe",
+      "args": ["scripts/10_train_hosp_bonenet.py", "--config", "configs/hosp_bonenet.yaml"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": []
+    },
+    {
+      "label": "Evaluate frozen Phase 9",
+      "type": "process",
+      "command": "${workspaceFolder}/.venv/Scripts/python.exe",
+      "args": ["scripts/12_evaluate.py", "--config", "configs/evaluation.yaml"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": []
+    },
+    {
+      "label": "Launch Streamlit demo",
+      "type": "process",
+      "command": "${workspaceFolder}/.venv/Scripts/python.exe",
+      "args": ["-m", "streamlit", "run", "app/streamlit_app.py"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": []
     }
   ]
 }

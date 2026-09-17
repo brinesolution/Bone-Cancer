@@ -4,7 +4,7 @@
 Phase command entry points.
 
 ## Files
-Scripts 01–08 cover audit/data/annotations; 09 trains baselines, 10 trains HOSP, 11 optimizes it, and 12 performs the sealed Phase 9 evaluation. Scripts 13–15 remain phase-gated.
+Scripts 01–08 cover audit/data/annotations; 09 trains baselines, 10 trains HOSP, 11 optimizes it, 12 evaluates, 13 validates comparison metrics, 14 validates explanation galleries, and 15 runs one-image frozen inference.
 
 ## Inputs
 Configuration, installed package, immutable source data, label schema, and Phase 2 manifests in stage order.
@@ -23,6 +23,10 @@ Thin scripts keep core logic reusable. The corrected partitions reference immuta
 
 ## Execution
 Run Phase 9 with `.venv\Scripts\python.exe scripts\12_evaluate.py --config configs\evaluation.yaml`; after technical visual QA, append `--finalize-visual-qa` to publish it.
+
+Validate sealed reports with `.venv\Scripts\python.exe scripts\13_compare_models.py` and `.venv\Scripts\python.exe scripts\14_generate_explanations.py --split test`.
+
+Run inference with `.venv\Scripts\python.exe scripts\15_infer_image.py --image PATH --device cuda`.
 
 ## Notes
 Never edit Main or generated outputs manually. Phase 3 depends on final Phase 2 master/duplicate reports. Training must consume `workspace/splits/fit_train.csv`, never official folders or the calibration/held-out manifests.

@@ -1,6 +1,6 @@
 param(
     [ValidateSet(
-        'verify', 'test', 'lint', 'compile', 'phase2', 'phase3', 'phase4', 'phase5',
+        'verify', 'test', 'lint', 'compile', 'audit', 'annotate', 'phase2', 'phase3', 'phase4', 'phase5', 'hosp', 'evaluate', 'app',
         'baseline-densenet121', 'baseline-efficientnet-b3',
         'baseline-convnext-tiny', 'baseline-swin-tiny'
     )]
@@ -41,11 +41,16 @@ try {
     else {
         switch ($Action) {
             'verify' { & $projectPython 'scripts/00_verify_environment.py' --require-cuda }
+            'audit' { & $projectPython 'scripts/02_audit_dataset.py' --config 'configs/data.yaml' }
+            'annotate' { & $projectPython 'scripts/07_launch_annotation_tool.py' }
             'test' { & $projectPython -m pytest -q }
             'lint' { & $projectPython -m ruff check . }
             'compile' { & $projectPython -m compileall -q src scripts app tools }
             'phase4' { & $projectPython 'scripts/08_validate_annotations.py' }
             'phase5' { & $projectPython 'scripts/09_train_baseline.py' --validate-artifacts }
+            'hosp' { & $projectPython 'scripts/10_train_hosp_bonenet.py' --config 'configs/hosp_bonenet.yaml' }
+            'evaluate' { & $projectPython 'scripts/12_evaluate.py' --config 'configs/evaluation.yaml' }
+            'app' { & $projectPython -m streamlit run 'app/streamlit_app.py' }
             'baseline-densenet121' {
                 & $projectPython 'scripts/09_train_baseline.py' --config 'configs/baseline_densenet121.yaml'
             }

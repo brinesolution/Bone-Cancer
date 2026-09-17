@@ -1,6 +1,6 @@
 # Project guide
 
-Phases 1–9 establish the environment, audited data, leakage-controlled loaders, annotation workflow, trained models, validation-only optimization, and frozen test evaluation.
+Phases 1–9 establish the environment, audited data, leakage-controlled loaders, annotation workflow, trained models, validation-only optimization, and frozen test evaluation. Phase 10 adds the label-free inference API, Streamlit demo, repeatable commands, and final QA.
 
 ## 1. Project Overview
 
@@ -18,7 +18,7 @@ Separate local metadata maps one-to-one by canonical source ID across all Main r
 
 ## 4. Folder Structure
 
-`src/bone_cancer_ai` owns reusable logic; `scripts` orchestrates; `configs` holds decisions. `dataset/Main` is immutable. `workspace` stores local metadata/cache/annotation revisions; `experiments` stores unique runs; `artifacts` stores outputs; `logs` stores evidence. `tools/annotation_app` is active; the inference app and notebooks remain scaffolds. Every major folder has a README; none is inserted into source data.
+`src/bone_cancer_ai` owns reusable logic; `scripts` orchestrates; `configs` holds decisions. `dataset/Main` is immutable. `workspace` stores local metadata/cache/annotation revisions; `experiments` stores unique runs; `artifacts` stores outputs; `logs` stores evidence. `app/streamlit_app.py` and `scripts/15_infer_image.py` use the frozen registry alias for label-free inference. Every major folder has a concise README; none is inserted into source data.
 
 ## 5. Environment Setup
 
@@ -92,7 +92,7 @@ Pending supported subtype labels. Compute energy from logits and calibrate rejec
 
 ## 21. Conformal Uncertainty
 
-Pending calibration data and trained models. Hold out a grouped subset of official training data. Calibration scores define prediction sets; test labels never choose thresholds. Report coverage and set size with distribution-shift limitations.
+Phase 9 calibrates binary split-conformal sets on 857 held-out samples. The Phase 10 predictor reports the set, singleton/abstain state and entropy without using an input label. Coverage is a test-set result with distribution-shift limitations.
 
 ## 22. Loss Functions
 
@@ -122,11 +122,11 @@ Strict frozen loading, fixed threshold 0.5, entropy uncertainty and split-confor
 
 ## 28. Streamlit Demo
 
-Pending Phase 10. Upload, validate, predict, show calibrated confidence/abstention and supported outputs, export JSON and display research-use limitations. The current entry point reports its pending phase.
+`app/streamlit_app.py` accepts JPG/PNG uploads, validates and decodes them in memory, runs the checksum-bound `hosp_bonenet.phase8.selected` checkpoint, shows binary probability/confidence/entropy, conformal abstention, unverified spatial attention and Grad-CAM, and exports JSON metadata. Subtype/concept/OOD panels explicitly remain unavailable because those supervision gates are disabled. The banner states that the demo is research-use only and not a diagnosis.
 
 ## 29. How to Run Each Phase
 
-Phase 1 environment: script 00. Phase 2 audit: scripts 01–03. Phase 3 data: scripts 04–06. Phase 4 annotations: scripts 07–08. Phase 5 baselines: script 09. Phase 7 HOSP: script 10. Phase 8: script 11. Phase 9 runs with `.venv\Scripts\python.exe scripts\12_evaluate.py --config configs\evaluation.yaml`; after recording technical QA, publish with the same command plus `--finalize-visual-qa`. Exact reruns validate and reuse the sealed result. Always use `.venv` and run pytest, Ruff and compileall after changes.
+Phase 1 environment: script 00. Phase 2 audit: scripts 01–03. Phase 3 data: scripts 04–06. Phase 4 annotations: scripts 07–08. Phase 5 baselines: script 09. Phase 7 HOSP: script 10. Phase 8: script 11. Phase 9 runs with `.venv\Scripts\python.exe scripts\12_evaluate.py --config configs\evaluation.yaml`; after recording technical QA, publish with the same command plus `--finalize-visual-qa`. Scripts 13–14 validate the sealed comparison and explanation outputs. Phase 10 inference: `.venv\Scripts\python.exe scripts\15_infer_image.py --image PATH --device cuda`; demo: `streamlit run app\streamlit_app.py`. Exact reruns validate and reuse the sealed result. Always use `.venv` and run pytest, Ruff and compileall after changes.
 
 ## 30. Common Errors and Troubleshooting
 
@@ -135,3 +135,7 @@ For initial creation when `py -3.11` cannot resolve uv Python, use `uv venv --py
 ## 31. Team Review Study Notes
 
 Member 1: study duplicate grouping and split invariants. Member 2: study Phase 4 annotation validity and conflicts. Member 3: study preprocessing, the shared baseline trainer and saved metrics. Member 4: keep HOSP-BoneNet heads gated by verified coverage and reserve calibration for uncertainty work. Phase 5 metrics are executed model results; radiologist/pathology verification remains Unavailable.
+
+## 32. Libraries
+
+PyTorch/torchvision/timm: models, transforms and CUDA training; MONAI/Albumentations: optional medical-image transforms; OpenCV/Pillow/NumPy/Pandas: decoding and tabular data; scikit-learn/TorchMetrics: metrics and calibration; Optuna: Phase 8 search; Grad-CAM: qualitative maps; Streamlit: demo; PyTest/Ruff: verification; TensorBoard/MLflow: optional experiment tracking.

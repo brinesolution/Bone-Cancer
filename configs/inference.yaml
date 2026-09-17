@@ -1,6 +1,6 @@
-status: pending_phase_10
+status: phase10_ready
 evaluation_status: phase_9_complete
-data_config: data.yaml
+data_config: configs/data.yaml
 model_config: hosp_bonenet.yaml
 checkpoint_alias: hosp_bonenet.phase8.selected
 checkpoint_registry: artifacts/checkpoints/registry.json

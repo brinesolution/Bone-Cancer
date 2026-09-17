@@ -1,8 +1,8 @@
 # Project state
 
-Current phase: Phase 9 — Final Evaluation, Comparison, Explainability and Visual QA COMPLETE
-Completed phases: 1–9
-Next phase: Phase 10 — Integration, Reproducibility and Team Documentation
+Current phase: Phase 10 — Application, Final Repository QA and Team Documentation COMPLETE
+Completed phases: 1–10
+Next phase: Project complete; maintain frozen artifacts and documented workflows
 
 ## Environment
 
@@ -53,13 +53,17 @@ Next phase: Phase 10 — Integration, Reproducibility and Team Documentation
 
 ## Verification
 
-- `pytest -q`: 462 passed; post-lint baseline regression: 126 passed
+- `pytest -q`: 472 passed; Phase 10 focused tests: 11 passed
 - Ruff, compileall and `pip check`: PASS
 - Frozen checkpoint reload and CUDA forward pass: PASS
+- Real CUDA single-image CLI inference: PASS; JSON written to `logs/phase10_inference.json`
+- Streamlit headless startup: PASS; HTTP 200 on local server
+- Comparison and explanation commands: PASS; sealed outputs reused without rerunning test inference
 - Required comparison/figures/failure gallery: generated and checksum-bound
 - Exact completed rerun and QA finalizer: PASS; changed config fails closed
 - Source preservation: PASS; exact Phase 1 snapshot match
 - Independent review: CLEAN after provenance and wording fixes
+- Phase 10: frozen predictor, CLI, Streamlit demo and final command wiring implemented
 
 ## Important paths
 
@@ -70,6 +74,9 @@ Next phase: Phase 10 — Integration, Reproducibility and Team Documentation
 - Figures: `artifacts/figures/`
 - Explanations: `artifacts/explainability/phase9/`
 - Ledger: `artifacts/metrics/hosp_phase9_test_ledger.json`
+- Inference config: `configs/inference.yaml`
+- Inference CLI: `scripts/15_infer_image.py`
+- Demo: `app/streamlit_app.py`
 
 ## Open issues
 
@@ -79,4 +86,4 @@ Next phase: Phase 10 — Integration, Reproducibility and Team Documentation
 
 ## Next action
 
-- Use LUNA for Phase 10 application integration, reproducibility QA and concise team documentation.
+- Project complete; use `scripts/15_infer_image.py` or `streamlit run app\streamlit_app.py` for inference.

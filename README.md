@@ -1,6 +1,6 @@
 # HOSP-BoneNet bone-tumour radiograph project
 
-Research and decision-support prototype. Phases 1–4 establish the verified environment, full local dataset audit, leakage-controlled manifests, deterministic loaders and local metadata/LabelMe annotation workflow. No trained model or diagnostic performance is available.
+Research-use prototype. Phases 1–10 establish the verified environment, audited data, leakage-controlled manifests, trained models, frozen evaluation, label-free inference and a Streamlit demo. Outputs are not a diagnosis.
 
 Start with [PROJECT_STATE.md](PROJECT_STATE.md), [PROJECT_GUIDE.md](PROJECT_GUIDE.md), and the authoritative [master directive](BONE_CANCER_10_PHASE_BUILD_DIRECTIVE.md). The latest transition is in [PHASE_HANDOFF.md](PHASE_HANDOFF.md).
 
@@ -20,6 +20,13 @@ python scripts\06_make_internal_splits.py
 pytest -q
 ruff check .
 python -m compileall -q src scripts app tools
+```
+
+Run one image through the frozen checkpoint:
+
+```powershell
+python scripts\15_infer_image.py --image "PATH_TO_XRAY" --device cuda
+streamlit run app\streamlit_app.py
 ```
 
 Fresh setup and wheel sources: [requirements/README.md](requirements/README.md). The src-layout package requires `python -m pip install -e .` after dependency installation.

@@ -4,7 +4,7 @@
 Application static assets.
 
 ## Files
-README.md: folder contract; no produced files yet.
+README.md: folder contract; no public assets are required by the current demo.
 
 ## Inputs
 Verified inputs from the owning phase.
@@ -13,16 +13,16 @@ Verified inputs from the owning phase.
 No outputs yet.
 
 ## Main Libraries
-None in Phase 1.
+None; the demo renders model outputs dynamically.
 
 ## Important Functions / Classes
 No functions in this output folder; parent README identifies producers.
 
 ## Theory
-Pending Phase 10; no patient/source images belong in public UI assets.
+The demo has no bundled patient/source images; uploaded images stay in memory.
 
 ## Execution
-Pending owning phase; see parent README.
+No command; see `app/streamlit_app.py`.
 
 ## Notes
-Do not edit generated records manually. Keep original dataset files untouched. Future-phase scaffolds are not completed functionality; update this README when implementation becomes active.
+Do not place patient data or generated records here. Keep original dataset files untouched.

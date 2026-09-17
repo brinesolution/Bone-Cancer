@@ -1,32 +1,25 @@
 # Phase handoff
 
-Phase completed: Phase 9 — Final Evaluation, Comparison, Explainability and Visual QA
+Phase completed: Phase 10 — Application, Final Repository QA and Team Documentation
 
 Important outputs:
-- `experiments/evaluation/phase9-2a9cd712f0e1`
-- `artifacts/metrics/final_model_comparison.csv`
-- `artifacts/figures/roc_curves.png`, `pr_curves.png`, `calibration_curves.png`
-- `artifacts/figures/confusion_matrices/`
-- `artifacts/explainability/phase9/`
-- sealed alias `hosp_bonenet.phase8.selected`
+- Frozen predictor/API: `src/bone_cancer_ai/inference/`
+- CLI: `scripts/15_infer_image.py`
+- Streamlit demo: `app/streamlit_app.py`
+- Sealed reports: `scripts/13_compare_models.py`, `scripts/14_generate_explanations.py`
+- Real inference evidence: `logs/phase10_inference.json`
 
 Tests:
-- PASS — 462 pytest tests; 126 targeted after lint-only baseline edit
-- PASS — Ruff, compileall, pip check and CUDA checkpoint reload/forward
-- PASS — one-time test ledger, exact reuse and changed-config rejection
-- PASS_WITH_LIMITATIONS — technical visual QA
-- PASS — independent review CLEAN
+- PASS — 472 pytest tests
+- PASS — Ruff, compileall, pip check
+- PASS — real CUDA inference and JSON export
+- PASS — Streamlit headless HTTP 200
+- PASS — source dataset preservation and frozen artifact reuse
 
-Important result: HOSP AUROC/AUPRC 0.965033/0.965161; EfficientNet-B3 leads at 0.978097/0.976115; HOSP test count is exactly one.
+Outstanding issue:
+- Qualitative explanations only; subtype/concepts/OOD and clinical validation unavailable.
 
-Outstanding issue: explanations are qualitative; external/OOD, multi-seed and clinical validation unavailable.
-
-Do not rerun: test inference for the current HOSP checkpoint; script 12 verifies and reuses sealed predictions.
-
-Next model: LUNA
-
-Next phase: Phase 10 — Integration, Reproducibility and Team Documentation
-
-Start command: `Get-Content PROJECT_STATE.md; Get-Content configs\inference.yaml`
-
+Next model: LUNA (maintenance/documentation only)
+Next phase: Project complete
+Start command: `.venv\Scripts\python.exe scripts\15_infer_image.py --image PATH --device cuda`
 Resume from: `PROJECT_STATE.md`
