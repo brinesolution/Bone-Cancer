@@ -16,6 +16,8 @@ Tests:
 - PASS — Streamlit headless HTTP 200
 - PASS — source dataset preservation and frozen artifact reuse
 
+Do not rerun: sealed Phase 9 test evaluation; use `scripts/13_compare_models.py`, `scripts/14_generate_explanations.py`, or `scripts/15_infer_image.py` for reuse/inference.
+
 Outstanding issue:
 - Qualitative explanations only; subtype/concepts/OOD and clinical validation unavailable.
 
