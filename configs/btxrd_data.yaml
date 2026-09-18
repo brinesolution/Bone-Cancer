@@ -1,0 +1,41 @@
+project_root: E:/Bone Cancer
+# DataModule resolves these paths while source BTXRD remains audit-only.
+dataset_root: E:/Bone Cancer/dataset/Main
+source_root: dataset/BTXRD
+main_manifest: workspace/manifests/dataset_master.csv
+output_root: workspace/btxrd
+split_dir: workspace/btxrd
+image_size: 384
+seed: 42
+phash_distance: 4
+source_read_only: true
+quality_thresholds:
+  thumbnail_size: 256
+  rgb_grayscale_tolerance: 1
+  blank_std_threshold: 0.5
+  near_blank_std_threshold: 3.0
+  blank_entropy_threshold: 0.1
+  near_blank_entropy_threshold: 1.0
+  dark_pixel_threshold: 5
+  bright_pixel_threshold: 250
+preprocessing:
+  force_grayscale: true
+  pad_value: 0
+  normalize: imagenet
+augmentation:
+  horizontal_flip: false
+  vertical_flip: false
+  rotation_limit: 7
+  translate_limit: 0.03
+  scale_limit: 0.05
+  brightness_contrast_limit: 0.1
+  gamma_limit: [90, 110]
+  gaussian_noise_std_range: [0.01, 0.03]
+  clahe: false
+loader:
+  batch_size: 2
+  num_workers: 0
+  pin_memory: false
+  persistent_workers: false
+  sampling: shuffle
+read_only_sources: true

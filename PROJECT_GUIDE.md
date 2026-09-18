@@ -28,6 +28,9 @@ See requirements/README.md for commands and official sources. Python 3.11.15 is 
 
 Scripts 01–03 index, validate and group the dataset. `dataset_master.csv` includes stable record/canonical IDs, original absolute paths, split, dimensions, channels, byte/perceptual hashes, labels, partial-supervision flags and pixel-quality measurements. `quality_report.csv` isolates review fields, while `label_audit.csv` retains structural/provenance issues. No source image is altered, normalized or recompressed. Empty labels remain empty rather than guessed.
 
+## 6a. BTXRD subtype migration
+
+Phase A is implemented by `scripts/16_prepare_btxrd.py`. It hashes the read-only BTXRD images, links all 3,746 rows to unchanged Main paths by exact SHA-256, records pHash/exact duplicate evidence, preserves Main held-out partitions, and masks one conflicting subtype row plus four exact-label-conflict rows. Derived manifests live in `workspace/btxrd/`. Phase B uses `configs/hosp_btxrd_subtype.yaml`, a separate nine-class masked subtype schema, and `scripts/17_validate_btxrd_subtype.py`; training, calibration and BTXRD test metrics are pending and never reuse frozen binary test results.
 ## 7. Duplicate and Leakage Prevention
 
 Phase 2 found 2,045 connected duplicate candidate groups covering 6,968 images and 13,225 pair edges. Of those, 6,112 edges cross official splits, including 508 exact-byte cross-split edges. Evidence includes 1,080 SHA-256 matches, 11,016 canonical-ID matches and 4,300 pHash-distance candidates; an edge may contain more than one evidence type. Six candidate pairs have binary-label conflicts, including two exact-byte conflicts. Perceptual matches remain review candidates and are not automatically deleted.

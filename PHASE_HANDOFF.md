@@ -1,29 +1,23 @@
 # Phase handoff
 
-Phase completed: Phase 10 — Application, Final Repository QA and Team Documentation
+Phase completed: BTXRD migration Phase A — provenance audit and manifests
 
 Important outputs:
-- Frozen predictor/API: `src/bone_cancer_ai/inference/`
-- CLI: `scripts/15_infer_image.py`
-- Streamlit demo: `app/streamlit_app.py`
-- Direct launcher: `launch_web_app.py`
-- Sealed reports: `scripts/13_compare_models.py`, `scripts/14_generate_explanations.py`
-- Real inference evidence: `logs/phase10_inference.json`
+- Plan: `docs/superpowers/plans/2026-09-18-btxrd-subtype-migration.md`
+- Audit: `scripts/16_prepare_btxrd.py`; derived artifacts: `workspace/btxrd/`
+- Separate schema/config: `configs/btxrd_label_schema.yaml`, `configs/hosp_btxrd_subtype.yaml`
+- Wiring smoke: `scripts/17_validate_btxrd_subtype.py`
 
 Tests:
-- PASS — 472 pytest tests
-- PASS — Ruff, compileall, pip check
-- PASS — real CUDA inference and JSON export
-- PASS — Streamlit headless HTTP 200
-- PASS — launcher starts pinned `.venv` and results tab shows sealed metrics
-- PASS — source dataset preservation and frozen artifact reuse
-
-Do not rerun: sealed Phase 9 test evaluation; use `scripts/13_compare_models.py`, `scripts/14_generate_explanations.py`, or `scripts/15_infer_image.py` for reuse/inference.
+- PASS — focused migration/config/HOSP tests (31)
+- PASS — real BTXRD audit: 3,746/3,746 images, exact Main hash/path linkage, no missing/extra files
+- PASS — duplicate-aware groups/splits; CPU and CUDA masked subtype forward/backward smoke
+- PASS — source tree is read-only; frozen production artifacts unchanged
 
 Outstanding issue:
-- Qualitative explanations only; subtype/concepts/OOD and clinical validation unavailable.
+- Phase B training, fresh calibration, subtype metrics and checkpoint alias are Pending.
 
-Next model: LUNA (maintenance/documentation only)
-Next phase: Project complete
-Start command: `.venv\Scripts\python.exe scripts\15_infer_image.py --image PATH --device cuda`
+Next model: SOL
+Next phase: BTXRD migration Phase B — subtype-enabled HOSP training and fresh evaluation
+Start command: `.venv\Scripts\python.exe scripts\17_validate_btxrd_subtype.py --device cuda`
 Resume from: `PROJECT_STATE.md`

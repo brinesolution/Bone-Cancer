@@ -48,3 +48,6 @@ dist/
 /logs/*
 !/logs/README.md
 !/logs/.gitkeep
+/workspace/btxrd/*.csv
+/workspace/btxrd/*.json
+!/workspace/btxrd/README.md

@@ -1,0 +1,35 @@
+status: phase_b_pending_training
+run_namespace: experiments/btxrd_subtype
+train_config: hosp_train.yaml
+data_config: configs/btxrd_data.yaml
+label_schema: configs/btxrd_label_schema.yaml
+split_dir: workspace/btxrd
+model:
+  name: hosp_bonenet
+  backbone: convnext_tiny
+  pretrained: true
+  feature_dim: 256
+  pyramid_channels: 128
+  dropout: 0.2
+  pooling: adaptive_avg
+  localization_enabled: true
+  spatial_path: gated
+  subtype_enabled: true
+  num_subtypes: 9
+  risk_enabled: false
+  num_risk_classes: 0
+  concepts_enabled: false
+  num_concepts: 0
+loss_weights:
+  binary: 1.0
+  subtype: 1.0
+  risk: 0.0
+  segmentation: 0.0
+  concepts: 0.0
+  grounding: 0.0
+  hierarchy: 0.0
+verified_supervision: [binary, subtype]
+calibration:
+  binary: required_on_btxrd_calibration
+  subtype: required_on_btxrd_calibration
+  reuse_frozen_binary_test_metrics: false

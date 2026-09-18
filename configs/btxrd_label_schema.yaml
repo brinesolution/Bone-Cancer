@@ -1,0 +1,38 @@
+status: btxrd_phase_a_validated
+binary:
+  enabled: true
+  classes:
+    0: normal
+    1: bone_tumour
+  semantics_verified: true
+  provenance: BTXRD tumor flag linked by exact SHA-256 to dataset/Main
+subtype:
+  enabled: true
+  classes:
+    - giant cell tumor
+    - multiple osteochondromas
+    - osteochondroma
+    - osteofibroma
+    - osteosarcoma
+    - other bt
+    - other mt
+    - simple bone cyst
+    - synovial osteochondroma
+  labeled_images: 1866
+  masking: normal rows, conflicting rows and exact-label-conflict groups are invalid
+  provenance: BTXRD workbook one-hot flags; ambiguous rows remain masked
+risk:
+  enabled: false
+  available: true
+  classes: [benign, malignant]
+concepts:
+  enabled: false
+  available: false
+  names: []
+localization:
+  available: true
+  boxes_verified: false
+  masks_verified: false
+notes:
+  - This schema is separate from the frozen binary production schema.
+  - It may be used only with workspace/btxrd split artifacts and a fresh run namespace.

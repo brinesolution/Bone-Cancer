@@ -1,8 +1,8 @@
 # Project state
 
-Current phase: Phase 10 — Application, Final Repository QA and Team Documentation COMPLETE
-Completed phases: 1–10
-Next phase: Project complete; maintain frozen artifacts and documented workflows
+Current phase: BTXRD migration Phase A COMPLETE; Phase B pending training/evaluation
+Completed phases: 1–10; migration Phase A
+Next phase: BTXRD migration Phase B — fresh subtype-enabled HOSP run
 
 ## Environment
 
@@ -17,6 +17,9 @@ Next phase: Project complete; maintain frozen artifacts and documented workflows
 - Source preservation: 12,560 files / 1,120,418,007 bytes; exact Phase 1 match after Phase 9
 - Derived splits: fit 4,871; calibration 857; validation 1,453; test 1,882
 - Leakage: zero record/sample/group overlap; split generation unchanged
+- BTXRD: 3,746 images/metadata rows; 1,879 normal, 1,867 tumour; 1,866 valid subtype rows
+- BTXRD linkage: 3,746/3,746 exact SHA-256 Main matches; 3,746/3,746 paths resolved to Main
+- BTXRD derived splits: fit 2,222; calibration 389; val 606; test 529; 36 duplicate groups; 1 subtype conflict; 4 exact-label conflict rows masked
 - Test use: four baselines evaluated in Phase 5; frozen Phase 8 HOSP evaluated once in Phase 9
 
 ## Frozen models and test results
@@ -65,6 +68,7 @@ Next phase: Project complete; maintain frozen artifacts and documented workflows
 - Source preservation: PASS; exact Phase 1 snapshot match
 - Independent review: CLEAN after provenance and wording fixes
 - Phase 10: frozen predictor, CLI, Streamlit demo and final command wiring implemented
+- BTXRD Phase A audit, exact linkage, duplicate-aware manifests and subtype mask smoke pass
 
 ## Important paths
 
@@ -79,13 +83,16 @@ Next phase: Project complete; maintain frozen artifacts and documented workflows
 - Inference CLI: `scripts/15_infer_image.py`
 - Demo: `app/streamlit_app.py`
 - Direct launcher: `launch_web_app.py`
+- BTXRD audit: `scripts/16_prepare_btxrd.py`; artifacts: `workspace/btxrd/`
+- BTXRD subtype validation: `scripts/17_validate_btxrd_subtype.py`; config: `configs/hosp_btxrd_subtype.yaml`
 
 ## Open issues
 
 - Explainability is qualitative and not clinically or spatially validated.
 - Test calibration is imperfect; HOSP ECE is 0.102005.
 - Multi-seed, external/OOD and clinical validation remain unavailable.
+- BTXRD Phase B training, calibration, subtype metrics and fresh checkpoint: Pending. Frozen binary test metrics are not reused.
 
 ## Next action
 
-- Project complete; use `scripts/15_infer_image.py` or `streamlit run app\streamlit_app.py` for inference.
+- Re-run BTXRD audit with `scripts/16_prepare_btxrd.py`; then validate Phase B wiring with `scripts/17_validate_btxrd_subtype.py`. Train/evaluate only in `experiments/btxrd_subtype`; keep frozen production artifacts unchanged.
