@@ -7,6 +7,7 @@ from io import BytesIO
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import streamlit as st
 from PIL import Image, ImageOps, UnidentifiedImageError
 
@@ -29,6 +30,23 @@ def _decode_upload(value: bytes) -> np.ndarray:
         return np.asarray(image, dtype=np.uint8).copy()
 
 
+@st.cache_data(show_spinner=False)
+def load_model_comparison(project_root: str) -> pd.DataFrame:
+    """Load the sealed comparison table without running test inference."""
+
+    path = Path(project_root) / "artifacts" / "metrics" / "final_model_comparison.csv"
+    if not path.is_file():
+        raise FileNotFoundError(path)
+    frame = pd.read_csv(path)
+    required = {"model", "test_samples", "AUROC", "AUPRC", "F1", "ECE", "latency_ms"}
+    missing = required.difference(frame.columns)
+    if missing:
+        raise ValueError(f"comparison table is missing columns: {sorted(missing)}")
+    if frame["model"].duplicated().any() or len(frame) != 5:
+        raise ValueError("comparison table must contain five unique frozen models")
+    return frame
+
+
 def _show_result(result: InferenceResult) -> None:
     state = display_state(result)
     if state["status"] == "abstain":
@@ -49,7 +67,7 @@ def _show_result(result: InferenceResult) -> None:
         "gradcam": "Grad-CAM (predicted class)",
     }
     for column, (key, image) in zip(columns, images.items(), strict=True):
-        column.image(image, caption=labels[key], use_container_width=True)
+        column.image(image, caption=labels[key], width="stretch")
     if result.subtype is None:
         st.info("Subtype output unavailable: verified subtype supervision is disabled.")
     else:
@@ -66,10 +84,48 @@ def _show_result(result: InferenceResult) -> None:
     )
 
 
-def main() -> None:
-    st.set_page_config(page_title="HOSP-BoneNet Demo", page_icon="🩻", layout="wide")
-    st.title("HOSP-BoneNet radiograph demo")
-    st.caption(RESEARCH_DISCLAIMER)
+def _show_model_results(project_root: Path) -> None:
+    st.subheader("Frozen test-set model results")
+    st.caption(
+        "Read-only Phase 5/9 artifacts. Opening this tab does not retrain models "
+        "or rerun test inference."
+    )
+    try:
+        comparison = load_model_comparison(str(project_root))
+    except (FileNotFoundError, ValueError) as error:
+        st.error(f"Sealed comparison results are unavailable: {type(error).__name__}.")
+        return
+    columns = ["model", "test_samples", "AUROC", "AUPRC", "F1", "ECE", "latency_ms"]
+    display = comparison.loc[:, columns].copy()
+    for column in ("AUROC", "AUPRC", "F1", "ECE", "latency_ms"):
+        display[column] = display[column].astype(float).round(4)
+    st.dataframe(display, hide_index=True, width="stretch")
+    hosp = comparison.loc[comparison["model"] == "HOSP-BoneNet"]
+    if not hosp.empty:
+        row = hosp.iloc[0]
+        left, middle, right = st.columns(3)
+        left.metric("HOSP AUROC", f"{row['AUROC']:.4f}")
+        middle.metric("HOSP AUPRC", f"{row['AUPRC']:.4f}")
+        right.metric("HOSP F1", f"{row['F1']:.4f}")
+    figure_root = project_root / "artifacts" / "figures"
+    figures = [
+        ("ROC curves", "roc_curves.png"),
+        ("PR curves", "pr_curves.png"),
+        ("Calibration", "calibration_curves.png"),
+    ]
+    available = [
+        (caption, figure_root / filename)
+        for caption, filename in figures
+        if (figure_root / filename).is_file()
+    ]
+    if available:
+        chart_columns = st.columns(len(available))
+        for column, (caption, path) in zip(chart_columns, available, strict=True):
+            column.image(str(path), caption=caption, width="stretch")
+    st.info("Metrics are from the sealed Phase 9 evaluation; no clinical validation is implied.")
+
+
+def _show_single_image(project_root: Path) -> None:
     uploaded = st.file_uploader("Upload a radiograph", type=["jpg", "jpeg", "png"])
     if uploaded is None:
         st.info("Upload a JPG or PNG image to begin.")
@@ -84,12 +140,13 @@ def main() -> None:
     if st.session_state.get("upload_key") != upload_key:
         st.session_state.pop("last_result", None)
         st.session_state["upload_key"] = upload_key
-    st.image(image, caption="Uploaded radiograph", use_container_width=True)
+    st.image(image, caption="Uploaded radiograph", width="stretch")
     if st.button("Run frozen HOSP-BoneNet", type="primary"):
-        root = Path(__file__).resolve().parents[1]
         try:
             with st.spinner("Running frozen inference and explanations..."):
-                result = load_predictor(str(root)).predict_array(image, sample_id=uploaded.name)
+                result = load_predictor(str(project_root)).predict_array(
+                    image, sample_id=uploaded.name
+                )
         except (FileNotFoundError, RuntimeError, ValueError) as error:
             st.error(f"Inference could not run: {type(error).__name__}.")
             return
@@ -97,6 +154,18 @@ def main() -> None:
     result = st.session_state.get("last_result")
     if isinstance(result, InferenceResult):
         _show_result(result)
+
+
+def main() -> None:
+    st.set_page_config(page_title="HOSP-BoneNet Demo", page_icon="🩻", layout="wide")
+    st.title("HOSP-BoneNet radiograph demo")
+    st.caption(RESEARCH_DISCLAIMER)
+    root = Path(__file__).resolve().parents[1]
+    image_tab, results_tab = st.tabs(["Analyze an image", "Model test results"])
+    with image_tab:
+        _show_single_image(root)
+    with results_tab:
+        _show_model_results(root)
 
 
 if __name__ == "__main__":

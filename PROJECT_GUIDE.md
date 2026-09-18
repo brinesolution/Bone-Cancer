@@ -122,11 +122,11 @@ Strict frozen loading, fixed threshold 0.5, entropy uncertainty and split-confor
 
 ## 28. Streamlit Demo
 
-`app/streamlit_app.py` accepts JPG/PNG uploads, validates and decodes them in memory, runs the checksum-bound `hosp_bonenet.phase8.selected` checkpoint, shows binary probability/confidence/entropy, conformal abstention, unverified spatial attention and Grad-CAM, and exports JSON metadata. Subtype/concept/OOD panels explicitly remain unavailable because those supervision gates are disabled. The banner states that the demo is research-use only and not a diagnosis.
+`launch_web_app.py` starts the Streamlit demo with the pinned `.venv` interpreter. `app/streamlit_app.py` has an image-analysis tab for JPG/PNG uploads and a read-only model-results tab backed by sealed Phase 5/9 metrics and figures. The image tab runs checksum-bound `hosp_bonenet.phase8.selected`, shows binary probability/confidence/entropy, conformal abstention, unverified spatial attention and Grad-CAM, and exports JSON metadata. Subtype/concept/OOD panels explicitly remain unavailable because those supervision gates are disabled. The banner states that the demo is research-use only and not a diagnosis.
 
 ## 29. How to Run Each Phase
 
-Phase 1 environment: script 00. Phase 2 audit: scripts 01–03. Phase 3 data: scripts 04–06. Phase 4 annotations: scripts 07–08. Phase 5 baselines: script 09. Phase 7 HOSP: script 10. Phase 8: script 11. Phase 9 runs with `.venv\Scripts\python.exe scripts\12_evaluate.py --config configs\evaluation.yaml`; after recording technical QA, publish with the same command plus `--finalize-visual-qa`. Scripts 13–14 validate the sealed comparison and explanation outputs. Phase 10 inference: `.venv\Scripts\python.exe scripts\15_infer_image.py --image PATH --device cuda`; demo: `streamlit run app\streamlit_app.py`. Exact reruns validate and reuse the sealed result. Always use `.venv` and run pytest, Ruff and compileall after changes.
+Phase 1 environment: script 00. Phase 2 audit: scripts 01–03. Phase 3 data: scripts 04–06. Phase 4 annotations: scripts 07–08. Phase 5 baselines: script 09. Phase 7 HOSP: script 10. Phase 8: script 11. Phase 9 runs with `.venv\Scripts\python.exe scripts\12_evaluate.py --config configs\evaluation.yaml`; after recording technical QA, publish with the same command plus `--finalize-visual-qa`. Scripts 13–14 validate the sealed comparison and explanation outputs. Phase 10 inference: `.venv\Scripts\python.exe scripts\15_infer_image.py --image PATH --device cuda`; web app: `python launch_web_app.py`. Exact reruns validate and reuse the sealed result. Always use `.venv` and run pytest, Ruff and compileall after changes.
 
 ## 30. Common Errors and Troubleshooting
 

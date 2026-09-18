@@ -53,11 +53,12 @@ Next phase: Project complete; maintain frozen artifacts and documented workflows
 
 ## Verification
 
-- `pytest -q`: 472 passed; Phase 10 focused tests: 11 passed
+- `pytest -q`: 475 passed; launcher/UI focused tests: 14 passed
 - Ruff, compileall and `pip check`: PASS
 - Frozen checkpoint reload and CUDA forward pass: PASS
 - Real CUDA single-image CLI inference: PASS; JSON written to `logs/phase10_inference.json`
 - Streamlit headless startup: PASS; HTTP 200 on local server
+- Direct `launch_web_app.py` startup and two-tab results view: PASS
 - Comparison and explanation commands: PASS; sealed outputs reused without rerunning test inference
 - Required comparison/figures/failure gallery: generated and checksum-bound
 - Exact completed rerun and QA finalizer: PASS; changed config fails closed
@@ -77,6 +78,7 @@ Next phase: Project complete; maintain frozen artifacts and documented workflows
 - Inference config: `configs/inference.yaml`
 - Inference CLI: `scripts/15_infer_image.py`
 - Demo: `app/streamlit_app.py`
+- Direct launcher: `launch_web_app.py`
 
 ## Open issues
 

@@ -1,5 +1,7 @@
 # Changelog
 
+2026-09-18 — Added direct web-app launcher and read-only model-results dashboard.
+
 2026-09-17 — Completed one-time frozen Phase 9 test comparison, bootstrap intervals, conformal uncertainty, Grad-CAM/lesion galleries and technical visual QA.
 2026-09-17 — Completed Phase 10 frozen inference API, Streamlit demo, CLI workflows and final QA wiring.
 
@@ -61,3 +63,4 @@
 - Matched all 12,560 source files by path, SHA-256, size and mtime; all 201 directive paths and authored-folder READMEs present.
 - Completed independent review and addressed its two minor test suggestions.
 - Updated state/guide/handoff; stopped before Phase 2 for manual SOL selection. All model results remain Not run.
+2026-09-18 — Added direct web-app launcher and read-only model-results dashboard.

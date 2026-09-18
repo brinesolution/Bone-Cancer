@@ -26,8 +26,10 @@ Run one image through the frozen checkpoint:
 
 ```powershell
 python scripts\15_infer_image.py --image "PATH_TO_XRAY" --device cuda
-streamlit run app\streamlit_app.py
+python launch_web_app.py
 ```
+
+The web app has an image-analysis tab and a read-only model-results tab backed by the sealed comparison table and figures. Use `python launch_web_app.py --port 8502` to choose another local port.
 
 Fresh setup and wheel sources: [requirements/README.md](requirements/README.md). The src-layout package requires `python -m pip install -e .` after dependency installation.
 

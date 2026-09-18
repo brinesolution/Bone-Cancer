@@ -199,7 +199,7 @@
       "label": "Launch Streamlit demo",
       "type": "process",
       "command": "${workspaceFolder}/.venv/Scripts/python.exe",
-      "args": ["-m", "streamlit", "run", "app/streamlit_app.py"],
+      "args": ["launch_web_app.py"],
       "options": { "cwd": "${workspaceFolder}" },
       "problemMatcher": []
     }

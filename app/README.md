@@ -4,10 +4,10 @@
 Streamlit research demo for frozen HOSP-BoneNet inference.
 
 ## Files
-`streamlit_app.py` — upload/predict/display/export flow; `ui_helpers.py` — pure display and overlay helpers; `assets/` — static resources.
+`streamlit_app.py` — image analysis and sealed-results tabs; `ui_helpers.py` — pure display and overlay helpers; `assets/` — static resources.
 
 ## Inputs
-User-uploaded JPG/PNG plus the checksum-registered Phase 8 HOSP checkpoint.
+User-uploaded JPG/PNG, the checksum-registered Phase 8 HOSP checkpoint, and sealed Phase 5/9 metric artifacts.
 
 ## Outputs
 Binary probability, confidence, entropy, conformal abstention, unverified spatial attention, Grad-CAM and JSON metadata.
@@ -22,7 +22,7 @@ Streamlit, PyTorch, Pillow, NumPy and Matplotlib.
 Inference must not require/expose ground-truth labels.
 
 ## Execution
-`streamlit run app\streamlit_app.py`
+`python launch_web_app.py` (or `python launch_web_app.py --port 8502`)
 
 ## Notes
 No ground-truth labels are shown. Subtype/concept/OOD outputs remain unavailable. Keep `dataset/Main` untouched.

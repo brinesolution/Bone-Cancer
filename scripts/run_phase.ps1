@@ -50,7 +50,7 @@ try {
             'phase5' { & $projectPython 'scripts/09_train_baseline.py' --validate-artifacts }
             'hosp' { & $projectPython 'scripts/10_train_hosp_bonenet.py' --config 'configs/hosp_bonenet.yaml' }
             'evaluate' { & $projectPython 'scripts/12_evaluate.py' --config 'configs/evaluation.yaml' }
-            'app' { & $projectPython -m streamlit run 'app/streamlit_app.py' }
+            'app' { & $projectPython 'launch_web_app.py' }
             'baseline-densenet121' {
                 & $projectPython 'scripts/09_train_baseline.py' --config 'configs/baseline_densenet121.yaml'
             }

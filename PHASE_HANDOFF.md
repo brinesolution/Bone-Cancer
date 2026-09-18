@@ -6,6 +6,7 @@ Important outputs:
 - Frozen predictor/API: `src/bone_cancer_ai/inference/`
 - CLI: `scripts/15_infer_image.py`
 - Streamlit demo: `app/streamlit_app.py`
+- Direct launcher: `launch_web_app.py`
 - Sealed reports: `scripts/13_compare_models.py`, `scripts/14_generate_explanations.py`
 - Real inference evidence: `logs/phase10_inference.json`
 
@@ -14,6 +15,7 @@ Tests:
 - PASS — Ruff, compileall, pip check
 - PASS — real CUDA inference and JSON export
 - PASS — Streamlit headless HTTP 200
+- PASS — launcher starts pinned `.venv` and results tab shows sealed metrics
 - PASS — source dataset preservation and frozen artifact reuse
 
 Do not rerun: sealed Phase 9 test evaluation; use `scripts/13_compare_models.py`, `scripts/14_generate_explanations.py`, or `scripts/15_infer_image.py` for reuse/inference.
