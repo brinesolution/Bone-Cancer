@@ -1,8 +1,8 @@
 # Project state
 
-Current phase: BTXRD migration Phase B COMPLETE
+Current phase: BTXRD post-training review and subtype-aware application integration COMPLETE
 Completed phases: 1–10; migration Phases A–B
-Next phase: post-training review and subtype-aware application integration
+Next phase: future subtype experiments or app review
 
 ## Environment
 
@@ -74,6 +74,7 @@ Next phase: post-training review and subtype-aware application integration
 - BTXRD fresh test: binary AUROC 0.9653896010, AUPRC 0.9694396362, F1 0.9058823529
 - BTXRD subtype test: n=262, accuracy 0.7213740458, macro F1 0.4933201773, AUROC 0.9134007955
 - Conformal: binary coverage 0.8994307400 (calibration 389/test 527); subtype coverage 0.9007633588 (calibration 213/test 262)
+- Post-training review: PASS; fresh protocol and registry/checkpoint fingerprints verified
 
 ## Important paths
 
@@ -93,14 +94,15 @@ Next phase: post-training review and subtype-aware application integration
 - BTXRD Phase B runner: `scripts/18_train_btxrd_subtype.py`; trainer/evaluator: `src/bone_cancer_ai/training/hosp_trainer.py`, `src/bone_cancer_ai/evaluation/hosp_btxrd.py`
 - BTXRD run: `experiments/btxrd_subtype/run-a8ae625f34c1`; alias: `hosp_bonenet.btxrd.subtype.selected`
 - BTXRD checkpoint SHA-256: `7e999e7d958be92297c137d82a2b7de5409b64918dcae9f1d01cd393e00fa8f0`
+- Review: `artifacts/metrics/btxrd_subtype_review.json`; subtype predictor: `src/bone_cancer_ai/inference/btxrd.py`
 
 ## Open issues
 
 - Explainability is qualitative and not clinically or spatially validated.
 - Test calibration is imperfect; HOSP ECE is 0.102005.
 - Multi-seed, external/OOD and clinical validation remain unavailable.
-- BTXRD Phase B complete; no clinical/pathology validation claimed. Frozen binary test metrics were not reused.
+- BTXRD subtype output is research-only; no clinical/pathology validation claimed. Frozen binary test metrics were not reused.
 
 ## Next action
 
-- Reuse the completed run with `.venv\Scripts\python.exe scripts\18_train_btxrd_subtype.py`; inspect subtype metrics before application integration.
+- Launch app with `python launch_web_app.py`; the image tab offers frozen binary and BTXRD subtype-aware inference.

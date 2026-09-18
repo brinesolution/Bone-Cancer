@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from app.ui_helpers import RESEARCH_DISCLAIMER, display_state, overlay_images
+from app.ui_helpers import RESEARCH_DISCLAIMER, display_state, overlay_images, subtype_display_state
 from bone_cancer_ai.inference.postprocess import InferenceResult
 
 
@@ -41,3 +41,30 @@ def test_disclaimer_is_research_use_only() -> None:
     assert "research" in RESEARCH_DISCLAIMER.lower()
     assert "not a diagnosis" in RESEARCH_DISCLAIMER.lower()
 
+
+def test_subtype_display_state_exposes_top_class_and_ambiguity() -> None:
+    state = subtype_display_state(
+        type(
+            "Result",
+            (),
+            {
+                "binary_prediction": 1,
+                "binary_probability": 0.91,
+                "binary_confidence": 0.91,
+                "binary_uncertainty": 0.2,
+                "binary_conformal_set": [1],
+                "binary_rejected": False,
+                "subtype_prediction": "osteosarcoma",
+                "subtype_conformal_set": ["osteosarcoma", "other mt"],
+                "subtype_rejected": True,
+                "subtype_top_k": [
+                    {"name": "osteosarcoma", "probability": 0.7},
+                    {"name": "other mt", "probability": 0.2},
+                ],
+            },
+        )()
+    )
+    assert state["binary_prediction"] == "bone_tumour"
+    assert state["subtype_prediction"] == "osteosarcoma"
+    assert state["subtype_status"] == "review"
+    assert len(state["top_k"]) == 2

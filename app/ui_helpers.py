@@ -40,4 +40,21 @@ def overlay_images(result: InferenceResult) -> dict[str, np.ndarray]:
     return output
 
 
-__all__ = ["RESEARCH_DISCLAIMER", "display_state", "overlay_images"]
+def subtype_display_state(result: Any) -> dict[str, Any]:
+    """Map a BTXRD result to compact, label-free application fields."""
+
+    return {
+        "binary_prediction": "bone_tumour" if result.binary_prediction == 1 else "normal",
+        "binary_probability": result.binary_probability,
+        "binary_confidence": result.binary_confidence,
+        "binary_uncertainty": result.binary_uncertainty,
+        "binary_conformal_set": result.binary_conformal_set,
+        "binary_rejected": result.binary_rejected,
+        "subtype_prediction": result.subtype_prediction,
+        "subtype_conformal_set": result.subtype_conformal_set,
+        "subtype_status": "review" if result.subtype_rejected else "prediction",
+        "top_k": result.subtype_top_k,
+    }
+
+
+__all__ = ["RESEARCH_DISCLAIMER", "display_state", "overlay_images", "subtype_display_state"]
