@@ -1,22 +1,22 @@
 # app
 
 ## Purpose
-Streamlit research demo for frozen HOSP-BoneNet inference.
+Streamlit research demo for the current BTXRD subtype HOSP-BoneNet inference.
 
 ## Files
-`streamlit_app.py` — image analysis and sealed-results tabs; `ui_helpers.py` — pure display and overlay helpers; `assets/` — static resources.
+`streamlit_app.py` — compact image analysis and model-analytics tabs; `ui_helpers.py` — pure display and overlay helpers; `assets/` — static resources.
 
 ## Inputs
-User-uploaded JPG/PNG, the checksum-registered Phase 8 HOSP checkpoint, and sealed Phase 5/9 metric artifacts.
+User-uploaded JPG/PNG, the checksum-registered BTXRD Phase B checkpoint, and sealed metric/review artifacts.
 
 ## Outputs
-Binary probability, confidence, entropy, conformal abstention, unverified spatial attention, Grad-CAM and JSON metadata.
+Binary/subtype probabilities, conformal sets, uncertainty, top-k ranking, compact image evidence, provenance and JSON metadata.
 
 ## Main Libraries
 Streamlit, PyTorch, Pillow, NumPy and Matplotlib.
 
 ## Important Functions / Classes
-`load_predictor`, `_decode_upload`, `_show_result`; model logic stays in `src/bone_cancer_ai/inference`.
+`load_btxrd_predictor`, `_decode_upload`, `_show_btxrd_result`; model logic stays in `src/bone_cancer_ai/inference`.
 
 ## Theory
 Inference must not require/expose ground-truth labels.
@@ -25,4 +25,4 @@ Inference must not require/expose ground-truth labels.
 `python launch_web_app.py` (or `python launch_web_app.py --port 8502`)
 
 ## Notes
-No ground-truth labels are shown. Subtype/concept/OOD outputs remain unavailable. Keep `dataset/Main` untouched.
+No ground-truth labels are shown. Subtype predictions remain research-only. Keep `dataset/Main` untouched.

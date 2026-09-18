@@ -125,7 +125,7 @@ Strict frozen loading, fixed threshold 0.5, entropy uncertainty and split-confor
 
 ## 28. Streamlit Demo
 
-`launch_web_app.py` starts the Streamlit demo with the pinned `.venv` interpreter. `app/streamlit_app.py` has an image-analysis tab for JPG/PNG uploads and a read-only model-results tab backed by sealed Phase 5/9 metrics and figures. The image tab retains frozen `hosp_bonenet.phase8.selected` binary inference and offers checksum-bound BTXRD subtype inference through `hosp_bonenet.btxrd.subtype.selected`. It shows uploaded/preprocessed images, top-k subtype probabilities, conformal sets, provenance, spatial attention and Grad-CAM, and exports JSON metadata. The banner states that the demo is research-use only and not a diagnosis. `scripts/19_review_btxrd_subtype.py` verifies the fresh run before app use.
+`launch_web_app.py` starts the Streamlit demo with the pinned `.venv` interpreter. `app/streamlit_app.py` has a compact image-analysis tab for JPG/PNG uploads and a model-analytics tab. The image tab runs only checksum-bound BTXRD subtype inference through `hosp_bonenet.btxrd.subtype.selected`; it shows constrained original/preprocessed images, top-k subtype probabilities, conformal sets, uncertainty, provenance, spatial attention and Grad-CAM, and exports JSON metadata. The banner states that the demo is research-use only and not a diagnosis. `scripts/19_review_btxrd_subtype.py` verifies the fresh run before app use.
 
 ## 29. How to Run Each Phase
 

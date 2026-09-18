@@ -14,7 +14,6 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 
 from app.ui_helpers import (
     RESEARCH_DISCLAIMER,
-    display_state,
     overlay_images,
     subtype_display_state,
 )
@@ -24,15 +23,6 @@ from bone_cancer_ai.inference.btxrd import (
     BtxrdSubtypeResult,
     btxrd_result_to_json,
 )
-from bone_cancer_ai.inference.postprocess import InferenceResult, result_to_json
-from bone_cancer_ai.inference.predictor import FrozenPredictor
-
-
-@st.cache_resource(show_spinner=False)
-def load_predictor(project_root: str) -> FrozenPredictor:
-    """Load the frozen predictor once per Streamlit process."""
-
-    return FrozenPredictor.from_project_root(Path(project_root))
 
 
 @st.cache_resource(show_spinner=False)
@@ -81,49 +71,6 @@ def load_model_comparison(project_root: str) -> pd.DataFrame:
     return frame
 
 
-def _show_result(result: InferenceResult, *, original_image: np.ndarray | None = None) -> None:
-    state = display_state(result)
-    if state["status"] == "abstain":
-        st.warning("Abstain / review required: the conformal set is not a singleton.")
-    else:
-        st.success(f"Research result: {state['prediction']}")
-    left, middle, right = st.columns(3)
-    left.metric("Probability", f"{state['probability']:.3f}")
-    middle.metric("Confidence", f"{state['confidence']:.3f}")
-    right.metric("Uncertainty", f"{state['uncertainty']:.3f}")
-    st.write({"conformal_set": state["conformal_set"], "open_set": state["open_set_status"]})
-
-    if original_image is not None:
-        st.image(
-            original_image,
-            caption="Uploaded radiograph (input seen by the app)",
-            width="stretch",
-        )
-    images = overlay_images(result)
-    columns = st.columns(len(images))
-    labels = {
-        "image": "Preprocessed image",
-        "spatial_attention": "Unverified lesion-head spatial attention",
-        "gradcam": "Grad-CAM (predicted class)",
-    }
-    for column, (key, image) in zip(columns, images.items(), strict=True):
-        column.image(image, caption=labels[key], width="stretch")
-    if result.subtype is None:
-        st.info("Subtype output unavailable: verified subtype supervision is disabled.")
-    else:
-        st.write({"subtype": result.subtype})
-    if result.concepts is None:
-        st.info("Concept output unavailable: verified concept supervision is disabled.")
-    else:
-        st.write({"concepts": result.concepts})
-    st.download_button(
-        "Download JSON result",
-        data=result_to_json(result),
-        file_name="bone_cancer_inference.json",
-        mime="application/json",
-    )
-
-
 def _show_btxrd_result(
     result: BtxrdSubtypeResult,
     *,
@@ -157,26 +104,35 @@ def _show_btxrd_result(
         image_columns[0].image(
             original_image,
             caption="Uploaded radiograph (original pixels)",
-            width="stretch",
+            width=300,
         )
         image_columns[1].image(
             result.image,
             caption="Preprocessed image used by HOSP-BoneNet (384×384)",
-            width="stretch",
+            width=300,
         )
-    st.subheader("Subtype probability ranking")
-    ranking = pd.DataFrame(result.subtype_top_k)
-    ranking["probability"] = ranking["probability"].astype(float).round(4)
-    st.dataframe(ranking, hide_index=True, width="stretch")
-    images = overlay_images(result)
-    columns = st.columns(len(images))
-    labels = {
-        "image": "Preprocessed image",
-        "spatial_attention": "Unverified lesion-head spatial attention",
-        "gradcam": "Grad-CAM (binary tumour class)",
-    }
-    for column, (key, image) in zip(columns, images.items(), strict=True):
-        column.image(image, caption=labels[key], width="stretch")
+    with st.expander("Detailed prediction analytics", expanded=True):
+        ranking = pd.DataFrame(result.subtype_top_k)
+        ranking["probability"] = ranking["probability"].astype(float).round(4)
+        st.dataframe(ranking, hide_index=True, width="stretch")
+        st.write(
+            {
+                "binary_set_size": len(result.binary_conformal_set),
+                "subtype_set_size": len(result.subtype_conformal_set),
+                "subtype_set": result.subtype_conformal_set,
+                "evaluation_protocol": result.evaluation_protocol,
+            }
+        )
+    with st.expander("Visual evidence", expanded=False):
+        images = overlay_images(result)
+        columns = st.columns(len(images))
+        labels = {
+            "image": "Preprocessed image",
+            "spatial_attention": "Unverified lesion-head attention",
+            "gradcam": "Grad-CAM (binary tumour class)",
+        }
+        for column, (key, image) in zip(columns, images.items(), strict=True):
+            column.image(image, caption=labels[key], width=220)
     st.download_button(
         "Download BTXRD subtype JSON result",
         data=btxrd_result_to_json(result),
@@ -186,55 +142,52 @@ def _show_btxrd_result(
 
 
 def _show_model_results(project_root: Path) -> None:
-    st.subheader("Frozen test-set model results")
+    st.subheader("Current model analytics")
     st.caption(
-        "Read-only Phase 5/9 artifacts. Opening this tab does not retrain models "
-        "or rerun test inference."
+        "Read-only metrics for the current BTXRD subtype model. This page does not retrain "
+        "models or rerun test inference."
     )
-    try:
-        comparison = load_model_comparison(str(project_root))
-    except (FileNotFoundError, ValueError) as error:
-        st.error(f"Sealed comparison results are unavailable: {type(error).__name__}.")
-        return
-    columns = ["model", "test_samples", "AUROC", "AUPRC", "F1", "ECE", "latency_ms"]
-    display = comparison.loc[:, columns].copy()
-    for column in ("AUROC", "AUPRC", "F1", "ECE", "latency_ms"):
-        display[column] = display[column].astype(float).round(4)
-    st.dataframe(display, hide_index=True, width="stretch")
-    hosp = comparison.loc[comparison["model"] == "HOSP-BoneNet"]
-    if not hosp.empty:
-        row = hosp.iloc[0]
-        left, middle, right = st.columns(3)
-        left.metric("HOSP AUROC", f"{row['AUROC']:.4f}")
-        middle.metric("HOSP AUPRC", f"{row['AUPRC']:.4f}")
-        right.metric("HOSP F1", f"{row['F1']:.4f}")
-    figure_root = project_root / "artifacts" / "figures"
-    figures = [
-        ("ROC curves", "roc_curves.png"),
-        ("PR curves", "pr_curves.png"),
-        ("Calibration", "calibration_curves.png"),
-    ]
-    available = [
-        (caption, figure_root / filename)
-        for caption, filename in figures
-        if (figure_root / filename).is_file()
-    ]
-    if available:
-        chart_columns = st.columns(len(available))
-        for column, (caption, path) in zip(chart_columns, available, strict=True):
-            column.image(str(path), caption=caption, width="stretch")
-    with st.expander("BTXRD subtype-aware post-training review"):
+    with st.expander("Current BTXRD HOSP-BoneNet review", expanded=True):
         try:
             review = load_btxrd_review(str(project_root))
         except (FileNotFoundError, ValueError, OSError) as error:
             st.error(f"BTXRD review is unavailable: {type(error).__name__}.")
         else:
             st.json(review)
-            st.caption(
-                "Subtype metrics use fresh BTXRD calibration/test rows and are not reused "
-                "from the frozen binary test set."
-            )
-    st.info("Metrics are from the sealed Phase 9 evaluation; no clinical validation is implied.")
+    try:
+        comparison = load_model_comparison(str(project_root))
+    except (FileNotFoundError, ValueError) as error:
+        st.error(f"Sealed comparison results are unavailable: {type(error).__name__}.")
+    else:
+        columns = ["model", "test_samples", "AUROC", "AUPRC", "F1", "ECE", "latency_ms"]
+        display = comparison.loc[:, columns].copy()
+        for column in ("AUROC", "AUPRC", "F1", "ECE", "latency_ms"):
+            display[column] = display[column].astype(float).round(4)
+        with st.expander("Reference comparison and plots", expanded=False):
+            st.dataframe(display, hide_index=True, width="stretch")
+            hosp = comparison.loc[comparison["model"] == "HOSP-BoneNet"]
+            if not hosp.empty:
+                row = hosp.iloc[0]
+                left, middle, right = st.columns(3)
+                left.metric("Reference AUROC", f"{row['AUROC']:.4f}")
+                middle.metric("Reference AUPRC", f"{row['AUPRC']:.4f}")
+                right.metric("Reference F1", f"{row['F1']:.4f}")
+            figure_root = project_root / "artifacts" / "figures"
+            figures = [
+                ("ROC curves", "roc_curves.png"),
+                ("PR curves", "pr_curves.png"),
+                ("Calibration", "calibration_curves.png"),
+            ]
+            available = [
+                (caption, figure_root / filename)
+                for caption, filename in figures
+                if (figure_root / filename).is_file()
+            ]
+            if available:
+                chart_columns = st.columns(len(available))
+                for column, (caption, path) in zip(chart_columns, available, strict=True):
+                    column.image(str(path), caption=caption, width=220)
+    st.info("Metrics are research evaluation results; no clinical validation is implied.")
 
 
 def _show_single_image(project_root: Path) -> None:
@@ -250,24 +203,10 @@ def _show_single_image(project_root: Path) -> None:
         return
     upload_key = hashlib.sha256(uploaded_bytes).hexdigest()
     if st.session_state.get("upload_key") != upload_key:
-        st.session_state.pop("last_result", None)
         st.session_state.pop("last_btxrd_result", None)
         st.session_state["upload_key"] = upload_key
-    st.image(image, caption="Uploaded radiograph", width="stretch")
-    if st.button("Run frozen HOSP-BoneNet", type="primary"):
-        try:
-            with st.spinner("Running frozen inference and explanations..."):
-                result = load_predictor(str(project_root)).predict_array(
-                    image, sample_id=uploaded.name
-                )
-        except (FileNotFoundError, RuntimeError, ValueError) as error:
-            st.error(f"Inference could not run: {type(error).__name__}.")
-            return
-        st.session_state["last_result"] = result
-    result = st.session_state.get("last_result")
-    if isinstance(result, InferenceResult):
-        _show_result(result, original_image=image)
-    if st.button("Run BTXRD subtype HOSP-BoneNet"):
+    st.image(image, caption="Uploaded radiograph", width=360)
+    if st.button("Run current BTXRD subtype HOSP-BoneNet", type="primary"):
         try:
             with st.spinner("Running subtype-aware inference and explanations..."):
                 subtype_result = load_btxrd_predictor(str(project_root)).predict_array(
@@ -283,11 +222,16 @@ def _show_single_image(project_root: Path) -> None:
 
 
 def main() -> None:
-    st.set_page_config(page_title="HOSP-BoneNet Demo", page_icon="🩻", layout="wide")
-    st.title("HOSP-BoneNet radiograph demo")
+    st.set_page_config(
+        page_title="BTXRD HOSP-BoneNet Demo",
+        page_icon="🩻",
+        layout="centered",
+        initial_sidebar_state="collapsed",
+    )
+    st.title("BTXRD HOSP-BoneNet")
     st.caption(RESEARCH_DISCLAIMER)
     root = Path(__file__).resolve().parents[1]
-    image_tab, results_tab = st.tabs(["Analyze an image", "Model test results"])
+    image_tab, results_tab = st.tabs(["Analyze image", "Model analytics"])
     with image_tab:
         _show_single_image(root)
     with results_tab:

@@ -105,4 +105,4 @@ Next phase: future subtype experiments or app review
 
 ## Next action
 
-- Launch app with `python launch_web_app.py`; the image tab offers frozen binary and BTXRD subtype-aware inference.
+- Launch app with `python launch_web_app.py`; the image tab offers current BTXRD subtype-aware inference only.

@@ -43,3 +43,11 @@ def test_streamlit_app_exposes_image_and_results_views() -> None:
     assert len(app.tabs) == 2
     assert len(app.dataframe) == 1
     assert len(app.metric) == 3
+
+
+def test_streamlit_app_exposes_only_current_btxrd_inference_action() -> None:
+    root = Path(__file__).resolve().parents[1]
+    source = (root / "app" / "streamlit_app.py").read_text(encoding="utf-8")
+
+    assert "Run frozen HOSP-BoneNet" not in source
+    assert "Run current BTXRD subtype HOSP-BoneNet" in source
