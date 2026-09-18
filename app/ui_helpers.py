@@ -52,6 +52,7 @@ def subtype_display_state(result: Any) -> dict[str, Any]:
         "binary_rejected": result.binary_rejected,
         "subtype_prediction": result.subtype_prediction,
         "subtype_conformal_set": result.subtype_conformal_set,
+        "subtype_rejected": result.subtype_rejected,
         "subtype_status": "review" if result.subtype_rejected else "prediction",
         "top_k": result.subtype_top_k,
     }

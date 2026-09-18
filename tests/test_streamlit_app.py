@@ -66,5 +66,6 @@ def test_subtype_display_state_exposes_top_class_and_ambiguity() -> None:
     )
     assert state["binary_prediction"] == "bone_tumour"
     assert state["subtype_prediction"] == "osteosarcoma"
+    assert state["subtype_rejected"] is True
     assert state["subtype_status"] == "review"
     assert len(state["top_k"]) == 2
