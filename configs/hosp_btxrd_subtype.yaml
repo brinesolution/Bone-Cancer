@@ -33,3 +33,20 @@ calibration:
   binary: required_on_btxrd_calibration
   subtype: required_on_btxrd_calibration
   reuse_frozen_binary_test_metrics: false
+training:
+  epochs: 20
+  batch_size: 2
+  num_workers: 0
+  learning_rate: 0.00003
+  weight_decay: 0.0001
+  warmup_epochs: 1
+  gradient_accumulation_steps: 2
+  gradient_clip_norm: 1.0
+  early_stopping_patience: 5
+  selection_metric: AUROC
+  amp: true
+  seed: 42
+  device: cuda
+evaluation:
+  alpha_binary: 0.10
+  alpha_subtype: 0.10

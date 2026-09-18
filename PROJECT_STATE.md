@@ -1,6 +1,6 @@
 # Project state
 
-Current phase: BTXRD migration Phase A COMPLETE; Phase B pending training/evaluation
+Current phase: BTXRD migration Phase B implementation + smoke COMPLETE; full production run pending
 Completed phases: 1–10; migration Phase A
 Next phase: BTXRD migration Phase B — fresh subtype-enabled HOSP run
 
@@ -69,6 +69,8 @@ Next phase: BTXRD migration Phase B — fresh subtype-enabled HOSP run
 - Independent review: CLEAN after provenance and wording fixes
 - Phase 10: frozen predictor, CLI, Streamlit demo and final command wiring implemented
 - BTXRD Phase A audit, exact linkage, duplicate-aware manifests and subtype mask smoke pass
+- BTXRD Phase B trainer/evaluator tests: 3 focused + full suite 482 passed
+- BTXRD smoke run: one CUDA batch per split, fresh calibration/test artifacts; exploratory only
 
 ## Important paths
 
@@ -85,14 +87,15 @@ Next phase: BTXRD migration Phase B — fresh subtype-enabled HOSP run
 - Direct launcher: `launch_web_app.py`
 - BTXRD audit: `scripts/16_prepare_btxrd.py`; artifacts: `workspace/btxrd/`
 - BTXRD subtype validation: `scripts/17_validate_btxrd_subtype.py`; config: `configs/hosp_btxrd_subtype.yaml`
+- BTXRD Phase B runner: `scripts/18_train_btxrd_subtype.py`; trainer/evaluator: `src/bone_cancer_ai/training/hosp_trainer.py`, `src/bone_cancer_ai/evaluation/hosp_btxrd.py`
 
 ## Open issues
 
 - Explainability is qualitative and not clinically or spatially validated.
 - Test calibration is imperfect; HOSP ECE is 0.102005.
 - Multi-seed, external/OOD and clinical validation remain unavailable.
-- BTXRD Phase B training, calibration, subtype metrics and fresh checkpoint: Pending. Frozen binary test metrics are not reused.
+- BTXRD full configured training/evaluation and selected alias: Pending; smoke metrics are not benchmark results. Frozen binary test metrics are not reused.
 
 ## Next action
 
-- Re-run BTXRD audit with `scripts/16_prepare_btxrd.py`; then validate Phase B wiring with `scripts/17_validate_btxrd_subtype.py`. Train/evaluate only in `experiments/btxrd_subtype`; keep frozen production artifacts unchanged.
+- Run full Phase B with `.venv\Scripts\python.exe scripts\18_train_btxrd_subtype.py`; keep frozen production artifacts unchanged.
