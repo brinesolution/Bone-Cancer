@@ -71,6 +71,27 @@
       "status": "complete"
     }
   },
+  "hosp_bonenet.btxrd.subtype.selected": {
+    "alias": "hosp_bonenet.btxrd.subtype.selected",
+    "checkpoint_path": "artifacts/checkpoints/7e999e7d958be92297c137d82a2b7de5409b64918dcae9f1d01cd393e00fa8f0.pt",
+    "checkpoint_sha256": "7e999e7d958be92297c137d82a2b7de5409b64918dcae9f1d01cd393e00fa8f0",
+    "configuration_fingerprint": "a8ae625f34c1277d1b1d1bcc6f03db87a2198e56625646143ad114e8ee7a4e90",
+    "model_family": "hosp_bonenet",
+    "phase": "phase_b",
+    "selected_metric": {
+      "name": "val_AUROC",
+      "value": 0.9588021105878248
+    },
+    "source_run": "experiments/btxrd_subtype/run-a8ae625f34c1",
+    "test_status": {
+      "metrics_path": "experiments\\btxrd_subtype\\run-a8ae625f34c1\\metrics.json",
+      "predictions_sha256": "f98a63c9f8b517199c2d59757d3343debdf9a70e77aee7312eb5d5a1ca1e5c7e",
+      "protocol": "btxrd_fresh_calibration_and_test",
+      "status": "complete",
+      "subtype_predictions_sha256": "340c51fe0006290548387a44e26274820e052162aeff7d86d147d91e3716dd4d",
+      "test_evaluation_count": 1
+    }
+  },
   "hosp_bonenet.phase7.selected": {
     "alias": "hosp_bonenet.phase7.selected",
     "checkpoint_path": "artifacts/checkpoints/a6380739e6527a085434866c83a135b86ca118e82f8d5a8bf75d934d25ce268e.pt",

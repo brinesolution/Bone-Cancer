@@ -1,8 +1,8 @@
 # Project state
 
-Current phase: BTXRD migration Phase B implementation + smoke COMPLETE; full production run pending
-Completed phases: 1–10; migration Phase A
-Next phase: BTXRD migration Phase B — fresh subtype-enabled HOSP run
+Current phase: BTXRD migration Phase B COMPLETE
+Completed phases: 1–10; migration Phases A–B
+Next phase: post-training review and subtype-aware application integration
 
 ## Environment
 
@@ -44,7 +44,7 @@ Next phase: BTXRD migration Phase B — fresh subtype-enabled HOSP run
 - Galleries: four examples each for TP, TN, FP, FN and rejected cases
 - Visual QA: complete with limitations; no inversion, broken maps or overlay misalignment
 - Limitations: saturated lesion maps; some Grad-CAM focus on markers/borders/artifacts
-- Concepts/subtype/open-set performance: Unavailable; verified labels/OOD set absent
+- Frozen production concepts/open-set performance: Unavailable; BTXRD subtype metrics are recorded below
 
 ## Artifact reuse
 
@@ -56,7 +56,7 @@ Next phase: BTXRD migration Phase B — fresh subtype-enabled HOSP run
 
 ## Verification
 
-- `pytest -q`: 475 passed; launcher/UI focused tests: 14 passed
+- `pytest -q`: 482 passed; launcher/UI focused tests: 14 passed
 - Ruff, compileall and `pip check`: PASS
 - Frozen checkpoint reload and CUDA forward pass: PASS
 - Real CUDA single-image CLI inference: PASS; JSON written to `logs/phase10_inference.json`
@@ -70,7 +70,10 @@ Next phase: BTXRD migration Phase B — fresh subtype-enabled HOSP run
 - Phase 10: frozen predictor, CLI, Streamlit demo and final command wiring implemented
 - BTXRD Phase A audit, exact linkage, duplicate-aware manifests and subtype mask smoke pass
 - BTXRD Phase B trainer/evaluator tests: 3 focused + full suite 482 passed
-- BTXRD smoke run: one CUDA batch per split, fresh calibration/test artifacts; exploratory only
+- BTXRD Phase B: 20 epochs; best epoch 15; validation AUROC 0.9588021106
+- BTXRD fresh test: binary AUROC 0.9653896010, AUPRC 0.9694396362, F1 0.9058823529
+- BTXRD subtype test: n=262, accuracy 0.7213740458, macro F1 0.4933201773, AUROC 0.9134007955
+- Conformal: binary coverage 0.8994307400 (calibration 389/test 527); subtype coverage 0.9007633588 (calibration 213/test 262)
 
 ## Important paths
 
@@ -88,14 +91,16 @@ Next phase: BTXRD migration Phase B — fresh subtype-enabled HOSP run
 - BTXRD audit: `scripts/16_prepare_btxrd.py`; artifacts: `workspace/btxrd/`
 - BTXRD subtype validation: `scripts/17_validate_btxrd_subtype.py`; config: `configs/hosp_btxrd_subtype.yaml`
 - BTXRD Phase B runner: `scripts/18_train_btxrd_subtype.py`; trainer/evaluator: `src/bone_cancer_ai/training/hosp_trainer.py`, `src/bone_cancer_ai/evaluation/hosp_btxrd.py`
+- BTXRD run: `experiments/btxrd_subtype/run-a8ae625f34c1`; alias: `hosp_bonenet.btxrd.subtype.selected`
+- BTXRD checkpoint SHA-256: `7e999e7d958be92297c137d82a2b7de5409b64918dcae9f1d01cd393e00fa8f0`
 
 ## Open issues
 
 - Explainability is qualitative and not clinically or spatially validated.
 - Test calibration is imperfect; HOSP ECE is 0.102005.
 - Multi-seed, external/OOD and clinical validation remain unavailable.
-- BTXRD full configured training/evaluation and selected alias: Pending; smoke metrics are not benchmark results. Frozen binary test metrics are not reused.
+- BTXRD Phase B complete; no clinical/pathology validation claimed. Frozen binary test metrics were not reused.
 
 ## Next action
 
-- Run full Phase B with `.venv\Scripts\python.exe scripts\18_train_btxrd_subtype.py`; keep frozen production artifacts unchanged.
+- Reuse the completed run with `.venv\Scripts\python.exe scripts\18_train_btxrd_subtype.py`; inspect subtype metrics before application integration.

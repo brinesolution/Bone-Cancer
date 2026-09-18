@@ -2,6 +2,7 @@
 
 2026-09-18 — Added read-only BTXRD hash linkage, conflict masking, grouped manifests, subtype HOSP config and CPU/CUDA smoke validation.
 2026-09-18 — Added masked subtype HOSP trainer, fresh BTXRD conformal evaluation, resumable Phase B runner and isolated smoke artifacts.
+2026-09-18 — Completed 20-epoch CUDA BTXRD subtype run with fresh calibration/test metrics and selected checkpoint alias.
 2026-09-18 — Added direct web-app launcher and read-only model-results dashboard.
 
 2026-09-17 — Completed one-time frozen Phase 9 test comparison, bootstrap intervals, conformal uncertainty, Grad-CAM/lesion galleries and technical visual QA.
