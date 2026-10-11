@@ -101,3 +101,27 @@ def test_report_fails_when_tensor_computation_fails(monkeypatch):
     assert report["ok"] is False
     assert report["tensor_check"]["finite_gradient"] is False
     assert "synthetic device failure" in report["tensor_check"]["error"]
+
+
+def test_explicit_cpu_report_does_not_probe_or_execute_the_gpu(monkeypatch):
+    from bone_cancer_ai.utils import environment
+
+    calls = []
+
+    def cpu_compute(request):
+        calls.append(request)
+        assert request == "cpu"
+        return {"device": "cpu", "finite_gradient": True}
+
+    def broken_properties(_index):
+        raise RuntimeError("broken GPU")
+
+    monkeypatch.setattr(environment, "PACKAGE_IMPORTS", {"numpy": "numpy"})
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "device_count", lambda: 1)
+    monkeypatch.setattr(torch.cuda, "get_device_properties", broken_properties)
+    monkeypatch.setattr(environment, "verify_tensor_device", cpu_compute)
+    report = environment.environment_report(device="cpu")
+    assert report["ok"] is True
+    assert report["tensor_check"]["device"] == "cpu"
+    assert calls == ["cpu"]

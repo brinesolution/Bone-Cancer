@@ -57,6 +57,8 @@ def masked_cross_entropy(
     logits: torch.Tensor,
     targets: torch.Tensor,
     valid_mask: torch.Tensor,
+    *,
+    class_weights: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """Multiclass cross-entropy over explicitly valid samples only."""
     if not isinstance(logits, torch.Tensor) or not logits.is_floating_point():
@@ -69,6 +71,17 @@ def masked_cross_entropy(
     valid = valid_mask.to(device=logits.device, dtype=torch.bool)
     if not bool(valid.any()):
         return differentiable_zero(logits)
+    if class_weights is not None:
+        if (
+            not isinstance(class_weights, torch.Tensor)
+            or class_weights.ndim != 1
+            or class_weights.shape[0] != logits.shape[1]
+            or not class_weights.is_floating_point()
+            or not bool(torch.isfinite(class_weights).all())
+            or not bool((class_weights > 0).all())
+        ):
+            raise ValueError("class_weights must be finite, positive, and match class count")
+        class_weights = class_weights.to(device=logits.device, dtype=logits.dtype)
     selected_targets = targets.to(device=logits.device)[valid]
     if selected_targets.is_floating_point():
         if not bool((selected_targets == selected_targets.round()).all()):
@@ -76,4 +89,4 @@ def masked_cross_entropy(
     selected_targets = selected_targets.to(dtype=torch.long)
     if not bool(((selected_targets >= 0) & (selected_targets < logits.shape[1])).all()):
         raise ValueError("valid classification targets are outside the logits class range")
-    return F.cross_entropy(logits[valid], selected_targets)
+    return F.cross_entropy(logits[valid], selected_targets, weight=class_weights)

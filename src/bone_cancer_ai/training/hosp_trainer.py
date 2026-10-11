@@ -60,7 +60,10 @@ class HOSPMultiTaskTrainer:
         if self.selection_metric != "AUROC":
             raise ValueError("validation AUROC is the only supported selection metric")
         self.amp_requested = bool(self.resolved_config.get("amp", True))
-        self.criterion = HOSPLoss(weights=self._loss_weights())
+        self.criterion = HOSPLoss(
+            weights=self._loss_weights(),
+            subtype_class_weights=self._subtype_class_weights(),
+        )
         self.optimizer = build_optimizer(
             self.model,
             learning_rate=self._positive_float("learning_rate", 1e-4),
@@ -121,6 +124,17 @@ class HOSPMultiTaskTrainer:
             grounding=float(values.get("grounding", 0.0)),
             hierarchy=float(values.get("hierarchy", 0.0)),
         )
+
+    def _subtype_class_weights(self) -> torch.Tensor | None:
+        raw = self.resolved_config.get("subtype_class_weights")
+        if raw is None:
+            return None
+        if not isinstance(raw, list) or len(raw) < 2:
+            raise ValueError("subtype_class_weights must contain at least two weights")
+        values = torch.tensor([float(value) for value in raw], dtype=torch.float32)
+        if not bool(torch.isfinite(values).all()) or not bool((values > 0).all()):
+            raise ValueError("subtype_class_weights must be finite and positive")
+        return values
 
     def _integer(self, key: str, default: int) -> int:
         value = self.resolved_config.get(key, default)

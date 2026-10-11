@@ -44,10 +44,22 @@ class HOSPLoss(nn.Module):
         weights: LossWeights | None = None,
         *,
         positive_subtype_indices: tuple[int, ...] | None = None,
+        subtype_class_weights: torch.Tensor | None = None,
     ) -> None:
         super().__init__()
         self.weights = weights or LossWeights()
         self.positive_subtype_indices = positive_subtype_indices
+        if subtype_class_weights is not None:
+            if (
+                subtype_class_weights.ndim != 1
+                or not subtype_class_weights.is_floating_point()
+                or not bool(torch.isfinite(subtype_class_weights).all())
+                or not bool((subtype_class_weights > 0).all())
+            ):
+                raise ValueError("subtype_class_weights must be finite and positive")
+            self.register_buffer("subtype_class_weights", subtype_class_weights.detach().clone())
+        else:
+            self.subtype_class_weights = None
 
     @staticmethod
     def _task_mask(batch: Mapping[str, object], task: str) -> torch.Tensor | None:
@@ -158,7 +170,14 @@ class HOSPLoss(nn.Module):
                 and isinstance(targets, torch.Tensor)
                 and valid_mask is not None
             ):
-                losses[task] = masked_cross_entropy(logits, targets, valid_mask)
+                losses[task] = masked_cross_entropy(
+                    logits,
+                    targets,
+                    valid_mask,
+                    class_weights=(
+                        self.subtype_class_weights if task == "subtype" else None
+                    ),
+                )
         lesion_logits = predictions.get("lesion_logits")
         mask_targets = batch.get("mask")
         mask_valid = self._task_mask(batch, "mask")

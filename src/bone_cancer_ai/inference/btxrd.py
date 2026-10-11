@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -16,11 +16,16 @@ from torch.nn import functional as F
 from bone_cancer_ai.artifacts.registry import resolve_checkpoint
 from bone_cancer_ai.data.preprocessing import decode_radiograph
 from bone_cancer_ai.data.transforms import RadiographTransform
-from bone_cancer_ai.evaluation.calibration import binary_entropy
+from bone_cancer_ai.evaluation.calibration import (
+    BinaryTemperatureScaler,
+    TemperatureScaler,
+    binary_entropy,
+)
 from bone_cancer_ai.evaluation.hosp_btxrd import MulticlassConformalCalibrator
 from bone_cancer_ai.explainability.gradcam import GradCAM
 from bone_cancer_ai.explainability.overlays import denormalize_image
 from bone_cancer_ai.inference.conformal import BinaryConformalCalibrator
+from bone_cancer_ai.inference.quality import assess_image_quality
 from bone_cancer_ai.models.hosp_bonenet import create_hosp_bonenet
 from bone_cancer_ai.optimization.contracts import load_yaml, sha256_file
 
@@ -50,6 +55,8 @@ class BtxrdSubtypeResult:
     run_id: str
     checkpoint_sha256: str
     evaluation_protocol: str = "btxrd_fresh_calibration_and_test"
+    quality: dict[str, Any] = field(default_factory=dict)
+    calibration_artifact: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         """Return JSON-safe metadata while keeping image arrays out of downloads."""
@@ -71,6 +78,8 @@ class BtxrdSubtypeResult:
             "run_id": self.run_id,
             "checkpoint_sha256": self.checkpoint_sha256,
             "evaluation_protocol": self.evaluation_protocol,
+            "quality": dict(self.quality),
+            "calibration_artifact": self.calibration_artifact,
             "image_shape": list(self.image.shape),
             "spatial_attention_shape": (
                 list(self.spatial_attention.shape)
@@ -103,6 +112,9 @@ class BtxrdSubtypePredictor:
         model_alias: str = "",
         run_id: str = "",
         checkpoint_sha256: str = "",
+        binary_temperature: BinaryTemperatureScaler | None = None,
+        subtype_temperature: TemperatureScaler | None = None,
+        calibration_artifact: str = "",
     ) -> None:
         names = tuple(str(name) for name in subtype_names)
         if len(names) != subtype_calibrator.num_classes or len(names) < 2:
@@ -121,6 +133,9 @@ class BtxrdSubtypePredictor:
         self.model_alias = str(model_alias)
         self.run_id = str(run_id)
         self.checkpoint_sha256 = str(checkpoint_sha256)
+        self.binary_temperature = binary_temperature or BinaryTemperatureScaler()
+        self.subtype_temperature = subtype_temperature or TemperatureScaler()
+        self.calibration_artifact = str(calibration_artifact)
         self.transform = RadiographTransform(
             self.image_size, train=False, seed=42, normalize=True
         )
@@ -199,6 +214,41 @@ class BtxrdSubtypePredictor:
             calibration_count=int(binary_state["calibration_count"]),
         )
         subtype = MulticlassConformalCalibrator.from_state_dict(dict(subtype_state))
+        binary_temperature = BinaryTemperatureScaler()
+        subtype_temperature = TemperatureScaler()
+        calibration_artifact = root / "artifacts" / "metrics" / "btxrd_subtype_temperature.json"
+        calibration_artifact_name = ""
+        if calibration_artifact.is_file():
+            calibrated = json.loads(calibration_artifact.read_text(encoding="utf-8"))
+            if (
+                calibrated.get("status") != "complete"
+                or calibrated.get("checkpoint_sha256") != record.checkpoint_sha256
+                or calibrated.get("configuration_fingerprint")
+                != record.configuration_fingerprint
+            ):
+                raise ValueError(
+                    "BTXRD temperature artifact does not match the selected checkpoint"
+                )
+            binary_temperature = BinaryTemperatureScaler.from_dict(
+                dict(calibrated["binary_temperature"])
+            )
+            subtype_temperature = TemperatureScaler.from_dict(
+                dict(calibrated["subtype_temperature"])
+            )
+            calibrated_evaluation = calibrated.get("evaluation", {})
+            calibrated_subtype = calibrated_evaluation.get("subtype_calibrator")
+            calibrated_binary = calibrated_evaluation.get("binary_conformal")
+            if isinstance(calibrated_subtype, Mapping):
+                subtype = MulticlassConformalCalibrator.from_state_dict(dict(calibrated_subtype))
+            if isinstance(calibrated_binary, Mapping):
+                binary = BinaryConformalCalibrator(
+                    alpha=float(calibrated_binary["alpha"]),
+                    qhat=float(calibrated_binary["qhat"]),
+                    calibration_count=int(calibrated_binary["calibration_count"]),
+                )
+            calibration_artifact_name = str(calibration_artifact.relative_to(root)).replace(
+                "\\", "/"
+            )
         data_file = Path(str(config["data_config"]))
         data_file = data_file if data_file.is_absolute() else root / data_file
         data_config = load_yaml(data_file)
@@ -230,6 +280,9 @@ class BtxrdSubtypePredictor:
             model_alias=record.alias,
             run_id=record.source_run,
             checkpoint_sha256=record.checkpoint_sha256,
+            binary_temperature=binary_temperature,
+            subtype_temperature=subtype_temperature,
+            calibration_artifact=calibration_artifact_name,
         )
 
     def _attention(self, output: Mapping[str, Any]) -> np.ndarray | None:
@@ -248,6 +301,7 @@ class BtxrdSubtypePredictor:
         """Predict binary status and subtype while preserving visual evidence."""
 
         pixels = validate_image_array(image)
+        quality = assess_image_quality(pixels)
         if self.force_grayscale:
             grayscale = cv2.cvtColor(pixels, cv2.COLOR_RGB2GRAY)
             pixels = np.repeat(grayscale[..., None], 3, axis=2)
@@ -266,10 +320,14 @@ class BtxrdSubtypePredictor:
             or subtype_logits.shape != (1, len(self.subtype_names))
         ):
             raise RuntimeError("BTXRD model did not return configured binary and subtype logits")
-        probability = float(torch.sigmoid(binary_logits.reshape(-1)[0]).item())
+        scaled_binary_logits = self.binary_temperature.transform_logits(binary_logits.reshape(-1))
+        probability = float(torch.sigmoid(scaled_binary_logits[0]).item())
         binary_prediction = int(probability >= 0.5)
         binary_set = self.binary_calibrator.predict_sets(np.asarray([probability]))[0]
-        subtype_probabilities_array = torch.softmax(subtype_logits[0].to(torch.float64), dim=0)
+        scaled_subtype_logits = self.subtype_temperature.transform_logits(
+            subtype_logits.to(torch.float64)
+        )
+        subtype_probabilities_array = torch.softmax(scaled_subtype_logits[0], dim=0)
         subtype_probabilities = subtype_probabilities_array.cpu().numpy().astype(np.float64)
         subtype_indices = np.argsort(-subtype_probabilities, kind="stable")
         top_k = [
@@ -311,6 +369,8 @@ class BtxrdSubtypePredictor:
             model_alias=self.model_alias,
             run_id=self.run_id,
             checkpoint_sha256=self.checkpoint_sha256,
+            quality=quality.to_dict(),
+            calibration_artifact=self.calibration_artifact,
         )
 
     def predict_path(self, path: Path) -> BtxrdSubtypeResult:

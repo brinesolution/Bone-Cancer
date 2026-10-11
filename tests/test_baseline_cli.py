@@ -613,7 +613,7 @@ def test_successful_runs_are_unique_complete_and_never_use_test_for_selection(
         "last.pt",
         "best_checkpoint_path.txt",
         "confusion_matrix.csv",
-        "notes.md",
+        "notes.txt",
         "test_predictions.csv",
     }
     assert {path.name for path in first.iterdir()} == required
@@ -632,7 +632,7 @@ def test_successful_runs_are_unique_complete_and_never_use_test_for_selection(
     assert metrics["validation"]["AUROC"] == 0.8
     assert metrics["test"]["AUROC"] == 0.9
     assert metrics["selection"] == {"split": "val", "metric": "AUROC", "threshold": 0.5}
-    assert "test is evaluated once" in first.joinpath("notes.md").read_text(encoding="utf-8")
+    assert "test is evaluated once" in first.joinpath("notes.txt").read_text(encoding="utf-8")
     summary = pd.read_csv(config.parents[1] / "artifacts" / "metrics" / "baseline_summary.csv")
     assert summary.columns.tolist() == report_module.BASELINE_SUMMARY_COLUMNS
     assert len(summary) == 1
@@ -958,7 +958,7 @@ def test_convnext_run_persists_measured_memory_exception_evidence(tmp_path: Path
     evidence_copy = run / "memory_exception_evidence.json"
     assert evidence_copy.read_bytes() == CANONICAL_MEMORY_EVIDENCE_PATH.read_bytes()
     assert hashlib.sha256(evidence_copy.read_bytes()).hexdigest() == PINNED_MEMORY_EVIDENCE_SHA256
-    notes = run.joinpath("notes.md").read_text(encoding="utf-8")
+    notes = run.joinpath("notes.txt").read_text(encoding="utf-8")
     assert (
         "Memory exception: microbatch_size=4, gradient_accumulation_steps=2, "
         "effective_batch_size=8" in notes
@@ -991,7 +991,7 @@ def test_convnext_run_rejects_tampered_memory_evidence_before_training(tmp_path:
     run = next(
         (config.parents[1] / "experiments" / "baselines" / "convnext_tiny").iterdir()
     )
-    assert "Status: Failed" in run.joinpath("notes.md").read_text(encoding="utf-8")
+    assert "Status: Failed" in run.joinpath("notes.txt").read_text(encoding="utf-8")
     assert not run.joinpath("metrics.json").exists()
 
 
@@ -1053,7 +1053,7 @@ def test_convnext_revalidates_memory_evidence_after_fit_before_publication(
     run = next(
         (config.parents[1] / "experiments" / "baselines" / "convnext_tiny").iterdir()
     )
-    assert "Status: Failed" in run.joinpath("notes.md").read_text(encoding="utf-8")
+    assert "Status: Failed" in run.joinpath("notes.txt").read_text(encoding="utf-8")
     for result_name in (
         "metrics.json",
         "history.csv",
@@ -1097,7 +1097,7 @@ def test_convnext_second_evidence_gate_catches_tamper_after_complete_notes(
     run = next(
         (config.parents[1] / "experiments" / "baselines" / "convnext_tiny").iterdir()
     )
-    assert "Status: Failed" in run.joinpath("notes.md").read_text(encoding="utf-8")
+    assert "Status: Failed" in run.joinpath("notes.txt").read_text(encoding="utf-8")
     assert events == [
         "setup",
         "loader:fit_train",
@@ -1136,7 +1136,7 @@ def test_failed_run_records_status_without_metrics_or_summary_row(tmp_path: Path
 
     runs = list((config.parents[1] / "experiments" / "baselines" / "densenet121").iterdir())
     assert len(runs) == 1
-    assert "Status: Failed" in runs[0].joinpath("notes.md").read_text(encoding="utf-8")
+    assert "Status: Failed" in runs[0].joinpath("notes.txt").read_text(encoding="utf-8")
     assert not runs[0].joinpath("metrics.json").exists()
     assert not (config.parents[1] / "artifacts" / "metrics" / "baseline_summary.csv").exists()
 
@@ -1155,7 +1155,7 @@ def test_post_allocation_initialization_failure_is_recorded(
         baseline_cli.run_baseline(config, dependencies=_fake_dependencies([]))
 
     run = next((config.parents[1] / "experiments" / "baselines" / "densenet121").iterdir())
-    assert "Status: Failed" in run.joinpath("notes.md").read_text(encoding="utf-8")
+    assert "Status: Failed" in run.joinpath("notes.txt").read_text(encoding="utf-8")
 
 
 def test_cuda_preflight_happens_before_a_run_directory_is_created(tmp_path: Path) -> None:
@@ -1183,7 +1183,7 @@ def test_cuda_oom_adds_actionable_guidance_without_fake_results(tmp_path: Path) 
         baseline_cli.run_baseline(config, dependencies=dependencies)
 
     run = next((config.parents[1] / "experiments" / "baselines" / "densenet121").iterdir())
-    notes = run.joinpath("notes.md").read_text(encoding="utf-8")
+    notes = run.joinpath("notes.txt").read_text(encoding="utf-8")
     assert "Status: Failed" in notes
     assert "batch size" in notes
     assert "gradient accumulation" in notes
@@ -1209,7 +1209,7 @@ def test_smoke_run_is_recorded_only_in_its_bundle_not_the_final_summary(tmp_path
         "pretrained": False,
         "limit_batches": 1,
     }
-    assert "Run type: smoke" in run.joinpath("notes.md").read_text(encoding="utf-8")
+    assert "Run type: smoke" in run.joinpath("notes.txt").read_text(encoding="utf-8")
     assert not (config.parents[1] / "artifacts" / "metrics" / "baseline_summary.csv").exists()
     assert not (config.parents[1] / "artifacts" / "checkpoints" / "registry.json").exists()
 
@@ -1499,8 +1499,8 @@ def test_validator_requires_nonempty_evidence_and_exact_complete_status(tmp_path
     cases = [
         ("environment.txt", ""),
         ("git_commit.txt", ""),
-        ("notes.md", "Status: Running\n"),
-        ("notes.md", "Status: Complete\nStatus: Failed\n"),
+        ("notes.txt", "Status: Running\n"),
+        ("notes.txt", "Status: Complete\nStatus: Failed\n"),
     ]
     originals = {
         name: run.joinpath(name).read_text(encoding="utf-8") for name, _ in cases
@@ -1596,7 +1596,7 @@ def test_validator_rejects_missing_convnext_memory_note_evidence(
     tmp_path: Path, removed_line: str
 ) -> None:
     root, runs = _four_final_runs(tmp_path)
-    notes_path = runs["convnext_tiny"] / "notes.md"
+    notes_path = runs["convnext_tiny"] / "notes.txt"
     notes = notes_path.read_text(encoding="utf-8")
     assert removed_line in notes
     notes_path.write_text(notes.replace(removed_line + "\n", ""), encoding="utf-8")
@@ -1610,7 +1610,7 @@ def test_validator_rejects_nonexact_convnext_memory_note_block(
     tmp_path: Path, mutation: str
 ) -> None:
     root, runs = _four_final_runs(tmp_path)
-    notes_path = runs["convnext_tiny"] / "notes.md"
+    notes_path = runs["convnext_tiny"] / "notes.txt"
     lines = notes_path.read_text(encoding="utf-8").splitlines()
     expected = EXPECTED_CONVNEXT_MEMORY_NOTE_LINES
     start = lines.index(expected[0])

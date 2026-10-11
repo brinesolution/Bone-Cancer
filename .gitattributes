@@ -8,6 +8,8 @@
 *.yaml text eol=lf
 *.json text eol=lf
 *.toml text eol=lf
+*.rst text eol=lf
+MANIFEST.in text eol=lf
 *.ps1 text eol=crlf
 *.ipynb text eol=lf
 *.png binary

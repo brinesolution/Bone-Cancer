@@ -102,7 +102,7 @@ ROOT_REQUIRED_FILES = {
     "config.yaml",
     "environment.txt",
     "git_commit.txt",
-    "notes.md",
+    "notes.txt",
     "status.json",
     "selection.json",
     "metrics.json",
@@ -875,7 +875,7 @@ def _execute_hosp_training(
     prior_status: str | None = None
     if selected_resume is not None:
         run_dir, prior_status = _resume_directory(selected_resume, output_root, record)
-    notes_path = run_dir / "notes.md"
+    notes_path = run_dir / "notes.txt"
     try:
         if selected_resume is None:
             run_dir.joinpath("config.yaml").write_text(
@@ -1107,7 +1107,7 @@ def validate_run_bundle(run_dir: Path) -> dict[str, Any]:
     missing = ROOT_REQUIRED_FILES - present
     if missing:
         raise ValueError(f"run bundle is missing root artifacts: {sorted(missing)}")
-    for evidence in ("config.yaml", "environment.txt", "git_commit.txt", "notes.md"):
+    for evidence in ("config.yaml", "environment.txt", "git_commit.txt", "notes.txt"):
         if not root.joinpath(evidence).read_text(encoding="utf-8").strip():
             raise ValueError(f"run bundle has empty {evidence}")
     status = json.loads(root.joinpath("status.json").read_text(encoding="utf-8"))

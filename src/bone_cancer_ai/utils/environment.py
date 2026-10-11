@@ -55,7 +55,9 @@ PACKAGE_IMPORTS = {
 }
 
 
-def environment_report(require_cuda: bool = False, *, run_tensor_check: bool = True) -> dict:
+def environment_report(
+    require_cuda: bool = False, *, run_tensor_check: bool = True, device: str | None = None
+) -> dict:
     """Import dependencies and optionally verify tensor compute on the actual device."""
     packages = {}
     for distribution, module in PACKAGE_IMPORTS.items():
@@ -70,7 +72,7 @@ def environment_report(require_cuda: bool = False, *, run_tensor_check: bool = T
             packages[distribution] = {"import_ok": False, "error": f"{type(exc).__name__}: {exc}"}
     available = torch.cuda.is_available()
     cuda = {"available": available, "build_version": torch.version.cuda, "devices": []}
-    if available:
+    if available and device != "cpu":
         for index in range(torch.cuda.device_count()):
             props = torch.cuda.get_device_properties(index)
             cuda["devices"].append(
@@ -83,7 +85,7 @@ def environment_report(require_cuda: bool = False, *, run_tensor_check: bool = T
             )
     if run_tensor_check:
         try:
-            compute = verify_tensor_device("cuda" if available else "cpu")
+            compute = verify_tensor_device(device or ("cuda" if available else "cpu"))
         except Exception as exc:
             compute = {"finite_gradient": False, "error": f"{type(exc).__name__}: {exc}"}
     else:

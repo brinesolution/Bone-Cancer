@@ -46,7 +46,7 @@ REQUIRED_RUN_FILES = {
     "last.pt",
     "best_checkpoint_path.txt",
     "confusion_matrix.csv",
-    "notes.md",
+    "notes.txt",
     "test_predictions.csv",
 }
 COMMON_CONFIG_KEYS = {
@@ -1065,7 +1065,7 @@ def run_baseline(
     )
 
     run_dir = _new_run_directory(Path(runtime["output_root"]), str(record["model"]))
-    notes_path = run_dir / "notes.md"
+    notes_path = run_dir / "notes.txt"
     failure_note_snapshot = json.loads(json.dumps(record))
 
     try:
@@ -1268,7 +1268,7 @@ def _complete_final_candidate(
         config = _load_yaml(run_dir / "config.yaml", name="resolved run config")
         environment = run_dir.joinpath("environment.txt").read_text(encoding="utf-8").strip()
         git_state = run_dir.joinpath("git_commit.txt").read_text(encoding="utf-8").strip()
-        note_lines = run_dir.joinpath("notes.md").read_text(encoding="utf-8").splitlines()
+        note_lines = run_dir.joinpath("notes.txt").read_text(encoding="utf-8").splitlines()
         _validate_memory_exception_bundle(run_dir, config, project_root, note_lines)
     except (OSError, ValueError, KeyError, TypeError):
         return False
@@ -1300,13 +1300,13 @@ def _validate_run_bundle(run_dir: Path, alias: str, summary_row: Any) -> None:
         or not is_final_run_config(config)
     ):
         raise ValueError(f"run {run_dir.name} violates the exact final policy")
-    note_lines = run_dir.joinpath("notes.md").read_text(encoding="utf-8").splitlines()
+    note_lines = run_dir.joinpath("notes.txt").read_text(encoding="utf-8").splitlines()
     project_root = run_dir.parents[3]
     _validate_memory_exception_bundle(run_dir, config, project_root, note_lines)
     for evidence_name in ("environment.txt", "git_commit.txt"):
         if not run_dir.joinpath(evidence_name).read_text(encoding="utf-8").strip():
             raise ValueError(f"run {run_dir.name} has empty {evidence_name} evidence")
-    notes = run_dir.joinpath("notes.md").read_text(encoding="utf-8").splitlines()
+    notes = run_dir.joinpath("notes.txt").read_text(encoding="utf-8").splitlines()
     if [line for line in notes if line.startswith("Status:")] != ["Status: Complete"]:
         raise ValueError(f"run {run_dir.name} lacks exact Complete Status evidence")
     metrics = _strict_json(run_dir / "metrics.json")
@@ -1495,7 +1495,7 @@ def _find_exact_completed_run(
         try:
             status_lines = [
                 line
-                for line in (run_dir / "notes.md").read_text(encoding="utf-8").splitlines()
+                for line in (run_dir / "notes.txt").read_text(encoding="utf-8").splitlines()
                 if line.startswith("Status:")
             ]
         except OSError:

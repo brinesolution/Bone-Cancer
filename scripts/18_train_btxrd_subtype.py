@@ -62,15 +62,21 @@ def main() -> int:
     parser.add_argument(
         "--max-batches", type=int, default=None, help="limit each split for a smoke run"
     )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="override the configured seed for an isolated full robustness run",
+    )
     parser.add_argument("--allow-cpu", action="store_true", help="permit CPU exploratory runs")
     parser.add_argument("--force-new-run", action="store_true")
     parser.add_argument("--no-promote", action="store_true")
     args = parser.parse_args()
 
     runtime = load_config(args.config)
-    if runtime.get("status") != "phase_b_pending_training":
+    if not str(runtime.get("status", "")).startswith("phase_b_"):
         raise ValueError("BTXRD runtime config is not the Phase B contract")
-    if runtime.get("run_namespace") != "experiments/btxrd_subtype":
+    if not str(runtime.get("run_namespace", "")).startswith("experiments/btxrd_subtype"):
         raise ValueError("BTXRD training must use its isolated run namespace")
     data_config = load_config(_resolve(root, runtime["data_config"]))
     schema = load_config(_resolve(root, runtime["label_schema"]))
@@ -88,6 +94,12 @@ def main() -> int:
         raise FileNotFoundError("BTXRD split artifacts are incomplete")
 
     training = dict(runtime.get("training", {}))
+    if args.seed is not None and args.seed < 0:
+        raise ValueError("--seed must be non-negative")
+    configured_seed = int(training.get("seed", 42))
+    if args.seed is not None:
+        training["seed"] = int(args.seed)
+    promotion_allowed = bool(runtime.get("promotion", True)) and args.seed is None
     if args.epochs is not None:
         if args.epochs < 1:
             raise ValueError("--epochs must be positive")
@@ -110,6 +122,7 @@ def main() -> int:
         )
 
     loader_config = dict(data_config)
+    loader_config["seed"] = int(training.get("seed", configured_seed))
     loader_config["loader"] = dict(loader_config.get("loader", {}))
     loader_config["loader"]["batch_size"] = int(
         training.get("batch_size", loader_config["loader"].get("batch_size", 2))
@@ -130,9 +143,12 @@ def main() -> int:
 
         loaders = {name: limited(loader) for name, loader in loaders.items()}
 
+    contract_runtime = dict(runtime)
+    contract_runtime["training"] = training
+    contract_runtime["promotion"] = promotion_allowed
     contract = {
         "protocol": "btxrd_phase_b_subtype_enabled",
-        "runtime": runtime,
+        "runtime": contract_runtime,
         "data_config": loader_config,
         "label_schema": schema,
         "split_sha256": {name: _sha256(path) for name, path in split_paths.items()},
@@ -141,6 +157,7 @@ def main() -> int:
             "device": str(requested),
             "epochs_override": args.epochs,
             "max_batches": args.max_batches,
+            "seed_override": args.seed,
             "no_promote": bool(args.no_promote),
         },
     }
@@ -177,7 +194,12 @@ def main() -> int:
             )
             return 0
     atomic_write_json(contract, run_dir / "contract.json")
-    reusable = args.epochs is None and args.max_batches is None and not args.no_promote
+    reusable = (
+        args.epochs is None
+        and args.max_batches is None
+        and not args.no_promote
+        and promotion_allowed
+    )
     _write_status(
         status_path,
         {
@@ -190,10 +212,15 @@ def main() -> int:
 
     trainer_config = dict(training)
     trainer_config["loss_weights"] = dict(runtime.get("loss_weights", {}))
+    if "subtype_class_weights" in training:
+        trainer_config["subtype_class_weights"] = list(training["subtype_class_weights"])
     trainer_config["selection_metric"] = "AUROC"
     alias = (
         "hosp_bonenet.btxrd.subtype.test"
-        if args.no_promote or args.epochs is not None or args.max_batches is not None
+        if args.no_promote
+        or args.epochs is not None
+        or args.max_batches is not None
+        or not promotion_allowed
         else "hosp_bonenet.btxrd.subtype"
     )
     model = create_hosp_bonenet(runtime["model"], schema)
@@ -206,7 +233,19 @@ def main() -> int:
         device=requested,
         resume_from=resume if resume.is_file() and not args.force_new_run else None,
     )
-    fit_result = trainer.fit(loaders["fit_train"], loaders["val"])
+    try:
+        fit_result = trainer.fit(loaders["fit_train"], loaders["val"])
+    except KeyboardInterrupt:
+        _write_status(
+            status_path,
+            {
+                "status": "interrupted",
+                "configuration_fingerprint": fingerprint,
+                "run_dir": str(run_dir),
+                "reusable": False,
+            },
+        )
+        raise
 
     best_model = create_hosp_bonenet(runtime["model"], schema)
     best_trainer = HOSPMultiTaskTrainer(
@@ -248,6 +287,7 @@ def main() -> int:
         calibration_subtype_targets=cal_subtype_targets,
         test_subtype_logits=test_subtype_logits,
         test_subtype_targets=test_subtype_targets,
+        subtype_class_names=tuple(schema["subtype"]["classes"]),
         alpha_binary=float(runtime["evaluation"]["alpha_binary"]),
         alpha_subtype=float(runtime["evaluation"]["alpha_subtype"]),
     )
@@ -266,7 +306,12 @@ def main() -> int:
         "reused_frozen_binary_test_metrics": False,
     }
     atomic_write_json(metrics, metrics_path)
-    if not args.no_promote and args.epochs is None and args.max_batches is None:
+    if (
+        promotion_allowed
+        and not args.no_promote
+        and args.epochs is None
+        and args.max_batches is None
+    ):
         promote_checkpoint(
             root,
             alias="hosp_bonenet.btxrd.subtype.selected",

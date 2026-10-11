@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from io import BytesIO
 from pathlib import Path
 
@@ -18,18 +19,22 @@ from app.ui_helpers import (
     subtype_display_state,
 )
 from bone_cancer_ai.evaluation.btxrd_review import review_btxrd_run
+from bone_cancer_ai.evaluation.robustness import build_robustness_report
 from bone_cancer_ai.inference.btxrd import (
     BtxrdSubtypePredictor,
     BtxrdSubtypeResult,
     btxrd_result_to_json,
 )
+from bone_cancer_ai.inference.report import btxrd_result_to_html
 
 
 @st.cache_resource(show_spinner=False)
 def load_btxrd_predictor(project_root: str) -> BtxrdSubtypePredictor:
     """Load the separately registered BTXRD subtype predictor once."""
 
-    return BtxrdSubtypePredictor.from_project_root(Path(project_root))
+    return BtxrdSubtypePredictor.from_project_root(
+        Path(project_root), device=os.environ.get("BONE_CANCER_DEVICE") or None
+    )
 
 
 @st.cache_data(show_spinner=False)
@@ -45,6 +50,21 @@ def load_btxrd_review(project_root: str) -> dict[str, object]:
     if stored != review or review.get("status") != "pass":
         raise ValueError("BTXRD post-training review did not pass")
     return review
+
+
+@st.cache_data(show_spinner=False)
+def load_btxrd_robustness(project_root: str) -> dict[str, object]:
+    """Load seed/external validation bookkeeping and verify it is current."""
+
+    root = Path(project_root)
+    path = root / "artifacts" / "metrics" / "btxrd_robustness.json"
+    if not path.is_file():
+        raise FileNotFoundError(path)
+    stored = json.loads(path.read_text(encoding="utf-8"))
+    report = build_robustness_report(root)
+    if stored != report:
+        raise ValueError("BTXRD robustness report is stale")
+    return report
 
 
 def _decode_upload(value: bytes) -> np.ndarray:
@@ -83,6 +103,11 @@ def _show_btxrd_result(
         st.warning("Review required: a conformal prediction set is ambiguous or empty.")
     else:
         st.success(f"Subtype-aware research result: {state['subtype_prediction']}")
+    if result.quality.get("status") != "ok":
+        st.warning(
+            "Image quality requires review: "
+            + ", ".join(result.quality.get("warnings", []))
+        )
     columns = st.columns(4)
     columns[0].metric("Tumour probability", f"{state['binary_probability']:.3f}")
     columns[1].metric("Binary confidence", f"{state['binary_confidence']:.3f}")
@@ -121,6 +146,8 @@ def _show_btxrd_result(
                 "subtype_set_size": len(result.subtype_conformal_set),
                 "subtype_set": result.subtype_conformal_set,
                 "evaluation_protocol": result.evaluation_protocol,
+                "image_quality": result.quality,
+                "calibration_artifact": result.calibration_artifact or "uncalibrated",
             }
         )
     with st.expander("Visual evidence", expanded=False):
@@ -139,6 +166,12 @@ def _show_btxrd_result(
         file_name="btxrd_subtype_inference.json",
         mime="application/json",
     )
+    st.download_button(
+        "Download compact HTML report",
+        data=btxrd_result_to_html(result),
+        file_name="btxrd_subtype_report.html",
+        mime="text/html",
+    )
 
 
 def _show_model_results(project_root: Path) -> None:
@@ -153,7 +186,27 @@ def _show_model_results(project_root: Path) -> None:
         except (FileNotFoundError, ValueError, OSError) as error:
             st.error(f"BTXRD review is unavailable: {type(error).__name__}.")
         else:
-            st.json(review)
+            metrics = st.columns(3)
+            metrics[0].metric("Binary AUROC", f"{float(review['binary_auroc']):.3f}")
+            metrics[1].metric("Subtype macro-F1", f"{float(review['subtype_macro_f1']):.3f}")
+            metrics[2].metric(
+                "Subtype conformal coverage",
+                f"{float(review['subtype_conformal_coverage']):.3f}",
+            )
+            per_class = review.get("subtype_per_class", [])
+            if per_class:
+                class_frame = pd.DataFrame(per_class).set_index("name")[["f1", "recall"]]
+                st.caption("Temperature-calibrated per-subtype F1 and recall")
+                st.bar_chart(class_frame, height=240)
+            with st.expander("Raw review metadata", expanded=False):
+                st.json(review)
+    with st.expander("Robustness status", expanded=False):
+        try:
+            robustness = load_btxrd_robustness(str(project_root))
+        except (FileNotFoundError, ValueError, OSError) as error:
+            st.error(f"Robustness report is unavailable: {type(error).__name__}.")
+        else:
+            st.json(robustness)
     try:
         comparison = load_model_comparison(str(project_root))
     except (FileNotFoundError, ValueError) as error:

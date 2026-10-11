@@ -5,7 +5,7 @@ from pathlib import Path
 import pandas as pd
 from streamlit.testing.v1 import AppTest
 
-from app.streamlit_app import load_model_comparison
+from app.streamlit_app import load_btxrd_predictor, load_model_comparison
 from launch_web_app import build_command
 
 
@@ -42,7 +42,7 @@ def test_streamlit_app_exposes_image_and_results_views() -> None:
     assert not app.exception
     assert len(app.tabs) == 2
     assert len(app.dataframe) == 1
-    assert len(app.metric) == 3
+    assert len(app.metric) == 6
 
 
 def test_streamlit_app_exposes_only_current_btxrd_inference_action() -> None:
@@ -51,3 +51,12 @@ def test_streamlit_app_exposes_only_current_btxrd_inference_action() -> None:
 
     assert "Run frozen HOSP-BoneNet" not in source
     assert "Run current BTXRD subtype HOSP-BoneNet" in source
+
+
+def test_app_honors_the_launchers_explicit_cpu_selection(monkeypatch) -> None:
+    root = Path(__file__).resolve().parents[1]
+    monkeypatch.setenv("BONE_CANCER_DEVICE", "cpu")
+    load_btxrd_predictor.clear()
+    predictor = load_btxrd_predictor(str(root))
+    assert predictor.device.type == "cpu"
+    load_btxrd_predictor.clear()

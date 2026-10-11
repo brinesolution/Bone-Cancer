@@ -56,6 +56,39 @@ def review_btxrd_run(
     subtype_classes = len(subtype["classes_present"])
     if binary_samples < 1 or subtype_samples < 1 or subtype_classes < 2:
         raise ValueError("BTXRD metrics contain invalid sample counts")
+    calibrated: dict[str, Any] = {}
+    calibrated_path = root / "artifacts" / "metrics" / "btxrd_subtype_temperature.json"
+    if calibrated_path.is_file():
+        calibration = json.loads(calibrated_path.read_text(encoding="utf-8"))
+        if (
+            calibration.get("status") == "complete"
+            and calibration.get("checkpoint_sha256") == record.checkpoint_sha256
+            and calibration.get("configuration_fingerprint") == record.configuration_fingerprint
+        ):
+            scaled_evaluation = calibration.get("evaluation", {})
+            calibrated = {
+                "protocol": calibration.get("protocol"),
+                "binary_temperature": calibration.get("binary_temperature"),
+                "subtype_temperature": calibration.get("subtype_temperature"),
+                "binary": scaled_evaluation.get("binary"),
+                "binary_conformal": scaled_evaluation.get("binary_conformal"),
+                "subtype": scaled_evaluation.get("subtype"),
+                "subtype_conformal": scaled_evaluation.get("subtype_conformal"),
+            }
+    calibrated_subtype = calibrated.get("subtype") if isinstance(calibrated, dict) else {}
+    calibrated_subtype = calibrated_subtype if isinstance(calibrated_subtype, dict) else {}
+    per_class = calibrated_subtype.get("per_class") or subtype.get("per_class", [])
+    confusion = calibrated_subtype.get("confusion_matrix") or subtype.get(
+        "confusion_matrix", []
+    )
+    binary_conformal = calibrated.get("binary_conformal") if isinstance(calibrated, dict) else None
+    if not isinstance(binary_conformal, dict):
+        binary_conformal = evaluation["binary_conformal"]
+    subtype_conformal = (
+        calibrated.get("subtype_conformal") if isinstance(calibrated, dict) else None
+    )
+    if not isinstance(subtype_conformal, dict):
+        subtype_conformal = evaluation["subtype_conformal"]
     return {
         "status": "pass",
         "alias": record.alias,
@@ -71,8 +104,11 @@ def review_btxrd_run(
         "subtype_classes": subtype_classes,
         "subtype_accuracy": float(subtype["accuracy"]),
         "subtype_macro_f1": float(subtype["macro_f1"]),
-        "binary_conformal_coverage": float(evaluation["binary_conformal"]["coverage"]),
-        "subtype_conformal_coverage": float(evaluation["subtype_conformal"]["coverage"]),
+        "subtype_per_class": per_class,
+        "subtype_confusion_matrix": confusion,
+        "binary_conformal_coverage": float(binary_conformal["coverage"]),
+        "subtype_conformal_coverage": float(subtype_conformal["coverage"]),
+        "calibrated": calibrated,
     }
 
 

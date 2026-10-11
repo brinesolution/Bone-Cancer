@@ -1,0 +1,25 @@
+include README.rst
+include launch_web_app.py
+include setup.ps1 run.ps1
+include .env.example .gitignore .gitattributes
+recursive-include requirements *.txt
+recursive-include configs *.yaml
+recursive-include app *.py .gitkeep
+recursive-include scripts *.py *.ps1
+recursive-include tools *.py
+recursive-include notebooks *.ipynb
+include workspace/annotations/label_schema.yaml
+include artifacts/checkpoints/registry.json
+include artifacts/verification/phase5_convnext_batch8_memory_failures.json
+prune documentry
+prune .venv
+prune .git
+prune .idea
+prune .kilo
+prune .superpowers
+prune build
+prune dist
+prune dataset
+prune experiments
+prune logs
+global-exclude __pycache__ *.py[cod] *.pt *.pth *.ckpt *.onnx *.sqlite3*

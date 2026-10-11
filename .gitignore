@@ -1,8 +1,16 @@
-# Source data and local environments
+# Local documentation and tool state
+/documentry/
+/.idea/
+/.kilo/
+/.superpowers/
+
+# Source data stays local; retain the empty directory in fresh clones.
 /dataset/*
-!/dataset/README.md
+!/dataset/.gitkeep
+
+# Environments, Python/tool caches, and build products
 .venv/
-.idea/
+venv/
 __pycache__/
 *.py[cod]
 *.egg-info/
@@ -11,43 +19,50 @@ __pycache__/
 .mypy_cache/
 .ipynb_checkpoints/
 .coverage
+.coverage.*
+coverage.xml
 htmlcov/
 build/
 dist/
+
+# Credentials and machine settings
 .env
 .env.*
 !.env.example
+.streamlit/secrets.toml
+*.pem
+*.key
+
+# Learned/exported models and local runtime databases
 *.pt
 *.pth
 *.ckpt
 *.onnx
-# Generated/private records remain local; preserve folder documentation.
-/workspace/**/*.csv
-/workspace/annotations/*.sqlite3*
-/workspace/annotations/labelme/**/*
-/workspace/annotations/spatial_reviews/**/*
-/workspace/annotations/source_imports/**/*
-!/workspace/annotations/labelme/README.md
-!/workspace/annotations/spatial_reviews/README.md
-!/workspace/annotations/source_imports/README.md
-/workspace/annotations/*.json
-/workspace/cache/**/*
-!/workspace/cache/**/
-!/workspace/cache/**/README.md
-/workspace/annotations/boxes/**/*
-/workspace/annotations/masks/**/*
-!/workspace/annotations/**/
-!/workspace/annotations/**/README.md
+*.sqlite3*
+
+# Derived data, annotations, and caches; keep only the public label contract.
+/workspace/**/*
+!/workspace/**/
+!/workspace/**/.gitkeep
+!/workspace/annotations/label_schema.yaml
+
+# Run outputs and evaluation artifacts remain local.
 /experiments/**/*
 !/experiments/**/
-!/experiments/**/README.md
+!/experiments/**/.gitkeep
 /artifacts/**/*
 !/artifacts/**/
-!/artifacts/**/README.md
+!/artifacts/**/.gitkeep
 !/artifacts/checkpoints/registry.json
+# This small frozen record is required by ConvNeXt configuration and tests.
+!/artifacts/verification/phase5_convnext_batch8_memory_failures.json
 /logs/*
-!/logs/README.md
 !/logs/.gitkeep
-/workspace/btxrd/*.csv
-/workspace/btxrd/*.json
-!/workspace/btxrd/README.md
+
+# Operating-system/editor leftovers
+Thumbs.db
+Desktop.ini
+.DS_Store
+*.swp
+*.swo
+*~

@@ -11,7 +11,7 @@ $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $projectPython = Join-Path $projectRoot '.venv\Scripts\python.exe'
 if (-not (Test-Path -LiteralPath $projectPython)) {
-    throw 'Project interpreter missing. Follow requirements/README.md.'
+    throw 'Project interpreter missing. Follow README.rst for setup.'
 }
 Push-Location -LiteralPath $projectRoot
 try {

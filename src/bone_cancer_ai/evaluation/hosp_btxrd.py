@@ -7,6 +7,7 @@ It only consumes predictions from the BTXRD calibration and test partitions.
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -16,8 +17,10 @@ import torch
 from sklearn.metrics import (
     accuracy_score,
     balanced_accuracy_score,
+    confusion_matrix,
     f1_score,
     log_loss,
+    precision_recall_fscore_support,
     roc_auc_score,
 )
 
@@ -143,7 +146,12 @@ class MulticlassConformalCalibrator:
         )
 
 
-def subtype_classification_metrics(logits: object, targets: object) -> dict[str, object]:
+def subtype_classification_metrics(
+    logits: object,
+    targets: object,
+    *,
+    class_names: Sequence[str] | None = None,
+) -> dict[str, object]:
     """Compute subtype metrics for validated, subtype-labeled rows only."""
 
     values = torch.as_tensor(logits).detach()
@@ -152,9 +160,22 @@ def subtype_classification_metrics(logits: object, targets: object) -> dict[str,
     if not bool(torch.isfinite(values).all()):
         raise ValueError("logits must be finite")
     labels = _multiclass_targets(targets, int(values.shape[1]), int(values.shape[0]))
+    names = (
+        tuple(str(index) for index in range(int(values.shape[1])))
+        if class_names is None
+        else tuple(str(name) for name in class_names)
+    )
+    if len(names) != int(values.shape[1]) or len(set(names)) != len(names):
+        raise ValueError("class_names must uniquely name every logit class")
     probabilities = torch.softmax(values.to(torch.float64), dim=1).cpu().numpy()
     predictions = probabilities.argmax(axis=1)
     present = np.unique(labels)
+    precision, recall, f1, support = precision_recall_fscore_support(
+        labels,
+        predictions,
+        labels=list(range(int(values.shape[1]))),
+        zero_division=0,
+    )
     result: dict[str, object] = {
         "sample_count": int(labels.size),
         "class_count": int(values.shape[1]),
@@ -163,10 +184,26 @@ def subtype_classification_metrics(logits: object, targets: object) -> dict[str,
         "macro_f1": float(f1_score(labels, predictions, average="macro", zero_division=0)),
         "balanced_accuracy": float(balanced_accuracy_score(labels, predictions)),
         "log_loss": float(log_loss(labels, probabilities, labels=list(range(values.shape[1])))),
+        "confusion_matrix": confusion_matrix(
+            labels, predictions, labels=list(range(int(values.shape[1])))
+        ).astype(int).tolist(),
+        "per_class": [
+            {
+                "index": index,
+                "name": names[index],
+                "precision": float(precision[index]),
+                "recall": float(recall[index]),
+                "f1": float(f1[index]),
+                "support": int(support[index]),
+            }
+            for index in range(int(values.shape[1]))
+        ],
     }
     if present.size == values.shape[1]:
         result["AUROC"] = float(
-            roc_auc_score(labels, probabilities, multi_class="ovr", average="macro")
+            roc_auc_score(labels, probabilities[:, 1])
+            if values.shape[1] == 2
+            else roc_auc_score(labels, probabilities, multi_class="ovr", average="macro")
         )
     else:
         result["AUROC"] = None
@@ -183,6 +220,7 @@ def evaluate_hosp_btxrd_predictions(
     calibration_subtype_targets: object | None = None,
     test_subtype_logits: object | None = None,
     test_subtype_targets: object | None = None,
+    subtype_class_names: Sequence[str] | None = None,
     alpha_binary: float = 0.10,
     alpha_subtype: float = 0.10,
 ) -> dict[str, object]:
@@ -228,7 +266,9 @@ def evaluate_hosp_btxrd_predictions(
     subtype_calibrator = MulticlassConformalCalibrator.fit(
         calibration_probabilities, calibration_targets, alpha=alpha_subtype
     )
-    result["subtype"] = subtype_classification_metrics(test_logits, test_targets)
+    result["subtype"] = subtype_classification_metrics(
+        test_logits, test_targets, class_names=subtype_class_names
+    )
     result["subtype_conformal"] = subtype_calibrator.summarize(test_probabilities, test_targets)
     result["subtype_calibrator"] = subtype_calibrator.state_dict()
     return result
