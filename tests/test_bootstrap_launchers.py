@@ -27,11 +27,7 @@ def _quote(path: str | Path) -> str:
 
 
 def _powershell(code: str, *, launcher: str = "setup.ps1") -> subprocess.CompletedProcess:
-    command = (
-        "$ErrorActionPreference = 'Stop'; "
-        f". {_quote(ROOT / launcher)}; "
-        + code
-    )
+    command = f"$ErrorActionPreference = 'Stop'; . {_quote(ROOT / launcher)}; " + code
     return subprocess.run(
         [POWERSHELL, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command],
         capture_output=True,
@@ -108,6 +104,147 @@ def test_dataset_scan_reports_the_original_archive_structure(tmp_path: Path):
     assert state["present"] is True
     assert state["image_count"] == 1
     assert state["metadata_exists"] is True
+
+
+def test_main_dataset_scan_rejects_train_only_presence(tmp_path: Path):
+    clone = tmp_path / "clone"
+    (clone / "dataset/Main/train").mkdir(parents=True)
+    (clone / "scripts").mkdir()
+    (clone / "configs").mkdir()
+    shutil.copy2(ROOT / "setup.ps1", clone / "setup.ps1")
+    shutil.copy2(ROOT / "scripts/dataset_restore.py", clone / "scripts/dataset_restore.py")
+    shutil.copy2(
+        ROOT / "configs/main_dataset_manifest.csv", clone / "configs/main_dataset_manifest.csv"
+    )
+    shutil.copy2(
+        ROOT / "configs/main_dataset_manifest.json", clone / "configs/main_dataset_manifest.json"
+    )
+    result = _powershell(
+        f"Get-MainDatasetState -Root {_quote(clone)} -Python {_quote(sys.executable)} "
+        "| ConvertTo-Json -Compress",
+        launcher=str(clone / "setup.ps1"),
+    )
+    state = _json(result)
+    assert state["present"] is False
+    assert state["valid"] is False
+    assert state["error"]
+
+
+def test_setup_report_keeps_main_validation_when_model_readiness_throws(tmp_path: Path):
+    clone = tmp_path / "clone"
+    (clone / "app").mkdir(parents=True)
+    (clone / "pyproject.toml").write_text("[project]\nname='fixture'\n")
+    (clone / "app/streamlit_app.py").write_text("")
+    python = clone / ".venv/Scripts/python.exe"
+    python.parent.mkdir(parents=True)
+    python.write_bytes(b"fixture")
+    shutil.copy2(ROOT / "setup.ps1", clone / "setup.ps1")
+    report_path = tmp_path / "readiness.json"
+    setup_path = _quote(clone / "setup.ps1")
+    report_arg = _quote(report_path)
+    code = (
+        f". {setup_path} -CheckOnly -SkipDataset -ReportPath {report_arg}; "
+        "function Get-InstallProfile { param($Requested,$Root) return 'cpu' }; "
+        f"function Get-ProjectPython {{ param($Root) return {_quote(python)} }}; "
+        "function Get-MainDatasetState { param($Root,$Python) "
+        "return [PSCustomObject]@{valid=$true;present=$true;error='';total_images=12557} }; "
+        "function Invoke-PythonReadiness { param($Root,$Python,$Profile,[switch]$RepairPaths) "
+        "throw 'OSError: Torch import failed because the paging file is too small' }; "
+        "$code=Invoke-SetupMain; if ($code -ne 1) { throw 'Expected failed app readiness' }; 'done'"
+    )
+    result = subprocess.run(
+        [POWERSHELL, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", code],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr + result.stdout
+    report = json.loads(report_path.read_text())
+    assert report["main_dataset_valid"] is True
+    assert report["main_dataset_present"] is True
+    assert report["main_dataset_ready"] is True
+    assert report["environment_ready"] is False
+    assert report["model_ready"] is False
+    assert report["app_ready"] is False
+    assert any("paging file is too small" in error for error in report["errors"])
+
+
+def test_roboflow_export_requires_explicit_key_without_echoing_it(tmp_path: Path):
+    result = _powershell(
+        f"Get-RoboflowExportArchive -Root {_quote(tmp_path)} -ApiKey ''",
+    )
+    assert result.returncode != 0
+    assert "ROBOFLOW_API_KEY" in result.stderr
+    assert "api_key=" not in result.stderr
+
+
+def _run_mocked_roboflow_setup_failure(tmp_path: Path, mode: str):
+    clone = tmp_path / "clone"
+    (clone / "app").mkdir(parents=True)
+    (clone / "pyproject.toml").write_text("[project]\nname='fixture'\n")
+    (clone / "app/streamlit_app.py").write_text("")
+    python = clone / ".venv/Scripts/python.exe"
+    python.parent.mkdir(parents=True)
+    python.write_bytes(b"fixture")
+    shutil.copy2(ROOT / "setup.ps1", clone / "setup.ps1")
+    report_path = clone / "logs/setup_report.json"
+    api_key = "dummy-roboflow-key-987654"
+    signed_url = "https://download.example/archive.zip?signature=signed-secret-123"
+    setup_path = _quote(clone / "setup.ps1")
+    report_arg = _quote(report_path)
+    code = (
+        f". {setup_path} -ReportPath {report_arg} -RoboflowApiKey '{api_key}'; "
+        "function Get-InstallProfile { param($Requested,$Root) return 'cpu' }; "
+        f"function Get-ProjectPython {{ param($Root) return {_quote(python)} }}; "
+        "function Install-ProjectEnvironment { param($Root,$Profile) "
+        f"return {_quote(python)} }}; "
+        "function Get-BtxrdDatasetState { param($Root) "
+        "return [PSCustomObject]@{present=$true;image_count=3746} }; "
+        "function Get-MainDatasetState { param($Root,$Python) "
+        "return [PSCustomObject]@{valid=$false;present=$false;error='Main incomplete'} }; "
+        "function Get-RuntimeAssetState { param($Root) "
+        "return [PSCustomObject]@{present=$true} }; "
+        "function Invoke-PythonReadiness { param($Root,$Python,$Profile,[switch]$RepairPaths) "
+        "throw 'Synthetic readiness failure' }; "
+        f"function Invoke-RoboflowApiRequest {{ param($Client,$Uri) if ('{mode}' -eq 'api') "
+        "{ throw ('Mock API failure at ' + $Uri) } "
+        "$response=[System.Net.Http.HttpResponseMessage]::new([System.Net.HttpStatusCode]::OK); "
+        "$response.Content=[System.Net.Http.StringContent]::new("
+        f"'{{\"export\":{{\"link\":\"{signed_url}\"}}}}'); "
+        "return $response }; "
+        "function Invoke-RoboflowArchiveRequest { param($Client,$Uri) "
+        "throw ('Mock archive failure at ' + $Uri.AbsoluteUri) }; "
+        "$code=Invoke-SetupMain; if ($code -ne 1) { throw 'Expected setup failure' }; 'done'"
+    )
+    result = subprocess.run(
+        [POWERSHELL, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", code],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=30,
+    )
+    return result, report_path.read_text(encoding="utf-8")
+
+
+def test_roboflow_api_failure_redacts_nonempty_key_from_setup_report(tmp_path: Path):
+    result, report = _run_mocked_roboflow_setup_failure(tmp_path, "api")
+    assert result.returncode == 0, result.stderr + result.stdout
+    for output in (result.stdout, result.stderr, report):
+        assert "dummy-roboflow-key-987654" not in output
+        assert "api_key=" not in output
+    assert "Roboflow export failed" in report
+
+
+def test_roboflow_download_failure_redacts_signed_link_from_setup_report(tmp_path: Path):
+    result, report = _run_mocked_roboflow_setup_failure(tmp_path, "download")
+    assert result.returncode == 0, result.stderr + result.stdout
+    for output in (result.stdout, result.stderr, report):
+        assert "signed-secret-123" not in output
+        assert "download.example/archive.zip" not in output
+    assert "Roboflow archive download failed" in report
 
 
 def test_verified_download_reuses_good_bytes_without_another_request(tmp_path: Path):
@@ -469,6 +606,7 @@ def test_a_corrupt_optional_dataset_does_not_block_model_readiness(tmp_path: Pat
         shutil.copytree(
             ROOT / folder, tmp_path / folder, ignore=shutil.ignore_patterns("__pycache__")
         )
+    shutil.copytree(ROOT / "src/bone_cancer_ai", tmp_path / "bone_cancer_ai")
     registry = tmp_path / "artifacts/checkpoints/registry.json"
     registry.parent.mkdir(parents=True)
     shutil.copy2(ROOT / "artifacts/checkpoints/registry.json", registry)
@@ -513,9 +651,23 @@ def test_run_refreshes_its_report_after_automatic_setup(tmp_path: Path):
         "}\n"
     )
     result = subprocess.run(
-        [POWERSHELL, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
-         str(tmp_path / "run.ps1"), "-AutoSetup", "-CheckOnly", "-Tests", "none"],
-        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
+        [
+            POWERSHELL,
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(tmp_path / "run.ps1"),
+            "-AutoSetup",
+            "-CheckOnly",
+            "-Tests",
+            "none",
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=30,
     )
     assert result.returncode == 0, result.stderr + result.stdout
     assert json.loads((tmp_path / "logs/run_readiness.json").read_text())["app_ready"] is True
@@ -547,7 +699,11 @@ def test_run_stops_only_its_new_server_when_startup_fails(tmp_path: Path):
     )
     result = subprocess.run(
         [POWERSHELL, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", code],
-        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=30,
     )
     assert _json(result) == "clean"
     assert not (tmp_path / "logs/web_app_process.json").exists()

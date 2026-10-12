@@ -1,0 +1,26 @@
+{
+  "class_names": {
+    "0": "normal",
+    "1": "cancer"
+  },
+  "csv_encoding": "UTF-8",
+  "csv_line_ending": "LF",
+  "manifest_sha256": "06aecf842b3af537f483e871a4731fc7e0c477ad33ddde571a94e7b76847eea8",
+  "roboflow_export_verification": "Candidate provenance only; current local bytes are not independently verified against an official export.",
+  "roboflow_project": "https://universe.roboflow.com/normal-bones/bone-cancer-detection-xa7ru/dataset/1",
+  "schema": 1,
+  "source_counts": {
+    "btxrd": 3746,
+    "roboflow_candidate": 8811
+  },
+  "split_counts": {
+    "test": 1884,
+    "train": 8789,
+    "val": 1884
+  },
+  "split_csv_sha256": {
+    "test/_test_labels.csv": "9beda2452fb241f2dc6b0b8a44d130bc9c1634b5a247f87892c17f78fd55cce3",
+    "train/_train_labels.csv": "c1a1ee7a3aa6e7c4428d60a6ec54905296fe6a2d5ea2376ddbbe6d2a3a47d227",
+    "val/_val_labels.csv": "e9303a08c7af2cc942a1c40e1224b2b2a0b0e8caad9712c7097ad9232929d529"
+  }
+}

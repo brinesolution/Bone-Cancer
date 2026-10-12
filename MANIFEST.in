@@ -4,6 +4,7 @@ include setup.ps1 run.ps1
 include .env.example .gitignore .gitattributes
 recursive-include requirements *.txt
 recursive-include configs *.yaml
+include configs/main_dataset_manifest.csv configs/main_dataset_manifest.json
 recursive-include app *.py .gitkeep
 recursive-include scripts *.py *.ps1
 recursive-include tools *.py

@@ -78,12 +78,35 @@ attribution to the authors of *A Radiograph Dataset for the Classification,
 Localization, and Segmentation of Primary Bone Tumors*. The archive contains
 ``BTXRD/images``, ``BTXRD/Annotations``, and ``BTXRD/dataset.xlsx``.
 
-The larger original ``dataset/Main`` collection has 12,557 images and is not the
-same download as BTXRD. It is optional for the selected web app, but needed for
-the older Main training/evaluation protocol. Restore that original collection
-separately or supply a checksum-bound ``Main/`` ZIP using ``-MainDatasetUrl`` and
-``-MainDatasetSha256``. The installer does not invent the old official split
-assignments from a different dataset.
+The combined ``dataset/Main`` collection has 12,557 images: 3,746 byte-identical
+to BTXRD images and 8,811 local files attributed to the Roboflow v1 project
+``normal-bones/bone-cancer-detection-xa7ru``. Its train/val/test assignments are
+the project's original recipe (8,789/1,884/1,884 images), not the Roboflow
+export's own partitions (7,057/882/872). The checked-in
+``configs/main_dataset_manifest.csv`` records each expected filename, SHA-256,
+source mapping, label, and original split row order; its metadata pins the three
+original label CSV checksums. Setup validates all three splits and label files,
+and resumes restoration only from files whose hashes match this contract.
+
+The 8,811 Roboflow-attributed local files have not been independently verified
+against a fresh official export. Roboflow's export flow requires an account/API
+key and can preprocess images, so counts or a new export alone cannot prove the
+same bytes. If Main is incomplete, provide a ZIP containing the exact expected
+source files under ``Main/`` and a SHA-256 checksum with
+``-MainDatasetUrl``/``-MainDatasetSha256`` (or the matching
+``BONE_CANCER_MAIN_DATASET_URL`` environment variable and checksum parameter).
+Setup matches Roboflow candidates by expected filename and SHA-256 and restores
+the recorded Main split and labels; it will report a missing or mismatched
+source instead of guessing. For the official export flow, set ``ROBOFLOW_API_KEY``
+and run setup; it requests the Roboflow v1 folder export, waits for the response,
+and verifies every installed image against the pinned recipe. The API does not
+provide an archive checksum, so this verifies the expected image bytes before
+restoration. A predownloaded source can instead be supplied with
+``-RoboflowArchivePath`` plus ``-RoboflowArchiveSha256``,
+``-RoboflowArchiveUrl`` plus ``-RoboflowArchiveSha256``, or
+``-RoboflowSourceRoot``. The API key and generated signed download link are not
+written to the public contract or setup report. Use ``-SkipDataset`` when
+preparing only the web app and the selected BTXRD model.
 
 Setup updates the two data configurations' absolute root fields when the clone
 moves. If Main is unavailable, the subtype data configuration points at the

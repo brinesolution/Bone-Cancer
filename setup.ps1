@@ -18,7 +18,12 @@ param(
     [string]$ModelAssetsUrl = $env:BONE_CANCER_ASSETS_URL,
     [string]$ModelAssetsSha256 = '',
     [string]$MainDatasetUrl = $env:BONE_CANCER_MAIN_DATASET_URL,
-    [string]$MainDatasetSha256 = '',
+    [string]$MainDatasetSha256 = $env:BONE_CANCER_MAIN_DATASET_SHA256,
+    [string]$RoboflowApiKey = $env:ROBOFLOW_API_KEY,
+    [string]$RoboflowArchiveUrl = $env:BONE_CANCER_ROBOFLOW_ARCHIVE_URL,
+    [string]$RoboflowArchiveSha256 = $env:BONE_CANCER_ROBOFLOW_ARCHIVE_SHA256,
+    [string]$RoboflowArchivePath = $env:BONE_CANCER_ROBOFLOW_ARCHIVE_PATH,
+    [string]$RoboflowSourceRoot = $env:BONE_CANCER_ROBOFLOW_SOURCE_ROOT,
     [switch]$ExportAssets,
     [switch]$RunTests,
     [string]$ReportPath = ''
@@ -80,6 +85,114 @@ function Get-BtxrdDatasetState {
         $count = @(Get-ChildItem -LiteralPath $images -File | Where-Object { $_.Extension.ToLowerInvariant() -in @('.jpg', '.jpeg', '.png', '.bmp', '.tif', '.tiff') }).Count
     }
     return [PSCustomObject]@{ present = [bool]($metadata -and $count -gt 0); metadata_exists = [bool]$metadata; image_count = $count; root = $source }
+}
+
+function Get-MainDatasetState {
+    param([string]$Root, [string]$Python = (Get-ProjectPython -Root $Root))
+    $scriptPath = Get-SafeProjectPath -Root $Root -Relative 'scripts/dataset_restore.py'
+    $mainPath = Get-SafeProjectPath -Root $Root -Relative 'dataset/Main'
+    $manifest = Get-SafeProjectPath -Root $Root -Relative 'configs/main_dataset_manifest.csv'
+    $metadata = Get-SafeProjectPath -Root $Root -Relative 'configs/main_dataset_manifest.json'
+    if (-not (Test-Path -LiteralPath $scriptPath -PathType Leaf) -or -not (Test-Path -LiteralPath $manifest -PathType Leaf) -or -not (Test-Path -LiteralPath $metadata -PathType Leaf)) {
+        return [PSCustomObject]@{ present = $false; valid = $false; error = 'Portable Main dataset contract is missing.'; total_images = 0 }
+    }
+    Push-Location -LiteralPath $Root
+    try {
+        $output = & $Python -X utf8 $scriptPath validate --main $mainPath --manifest $manifest --metadata $metadata 2>&1
+        $exitCode = $LASTEXITCODE
+        $json = ($output | Where-Object { $_ -is [string] } | Select-Object -Last 1)
+        if ($json) {
+            try {
+                $state = $json | ConvertFrom-Json
+                if ($exitCode -eq 0 -and $state.valid) { return [PSCustomObject]@{ present = $true; valid = $true; error = ''; total_images = $state.total_images; counts = $state.counts; source_counts = $state.source_counts } }
+                return [PSCustomObject]@{ present = $false; valid = $false; error = [string]$state.error; total_images = 0 }
+            }
+            catch { }
+        }
+        return [PSCustomObject]@{ present = $false; valid = $false; error = 'Main dataset validation could not be completed.'; total_images = 0 }
+    }
+    finally { Pop-Location }
+}
+
+function Restore-MainDataset {
+    param([string]$Root, [string]$Python, [string[]]$SourceRoots)
+    $scriptPath = Get-SafeProjectPath -Root $Root -Relative 'scripts/dataset_restore.py'
+    $destination = Get-SafeProjectPath -Root $Root -Relative 'dataset/Main'
+    $manifest = Get-SafeProjectPath -Root $Root -Relative 'configs/main_dataset_manifest.csv'
+    $metadata = Get-SafeProjectPath -Root $Root -Relative 'configs/main_dataset_manifest.json'
+    $arguments = @('-X', 'utf8', $scriptPath, 'restore')
+    foreach ($sourceRoot in $SourceRoots) { $arguments += @('--source-root', $sourceRoot) }
+    $arguments += @('--destination', $destination, '--manifest', $manifest, '--metadata', $metadata)
+    Invoke-ProjectCommand -Executable $Python -Arguments $arguments -Root $Root
+}
+
+function Invoke-RoboflowApiRequest {
+    param([System.Net.Http.HttpClient]$Client, [string]$Uri)
+    return $Client.GetAsync($Uri).GetAwaiter().GetResult()
+}
+
+function Invoke-RoboflowArchiveRequest {
+    param([System.Net.Http.HttpClient]$Client, [Uri]$Uri)
+    return $Client.GetAsync($Uri, [System.Net.Http.HttpCompletionOption]::ResponseHeadersRead).GetAwaiter().GetResult()
+}
+
+function Get-RoboflowExportArchive {
+    param([string]$Root, [string]$ApiKey)
+    if ([string]::IsNullOrWhiteSpace($ApiKey)) { throw 'ROBOFLOW_API_KEY is required for an official Roboflow export.' }
+    Add-Type -AssemblyName System.Net.Http
+    $handler = New-Object System.Net.Http.HttpClientHandler
+    $handler.AllowAutoRedirect = $false
+    $client = New-Object System.Net.Http.HttpClient($handler)
+    $downloadClient = New-Object System.Net.Http.HttpClient
+    $client.Timeout = [TimeSpan]::FromSeconds(10)
+    $downloadClient.Timeout = [TimeSpan]::FromSeconds(120)
+    $apiUri = 'https://api.roboflow.com/normal-bones/bone-cancer-detection-xa7ru/1/folder?api_key=' + [Uri]::EscapeDataString($ApiKey) + '&nocache=true'
+    $downloadUri = $null
+    try {
+        $timer = [Diagnostics.Stopwatch]::StartNew()
+        for ($attempt = 0; $attempt -lt 120; $attempt++) {
+            if ($timer.Elapsed.TotalSeconds -ge 120) { break }
+            $response = Invoke-RoboflowApiRequest -Client $client -Uri $apiUri
+            $body = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+            if ([int]$response.StatusCode -eq 202) {
+                $response.Dispose()
+                if ($timer.Elapsed.TotalSeconds -ge 120) { break }
+                Start-Sleep -Seconds 1
+                continue
+            }
+            $response.Dispose()
+            if (-not $response.IsSuccessStatusCode) { throw 'Roboflow export request failed.' }
+            try { $payload = $body | ConvertFrom-Json } catch { throw 'Roboflow returned an invalid export response.' }
+            $downloadUri = [string]$payload.export.link
+            if (-not $downloadUri) { throw 'Roboflow export response did not contain an archive link.' }
+            break
+        }
+        if (-not $downloadUri) { throw 'Roboflow export did not finish within the 120-second timeout.' }
+        $uri = New-Object Uri($downloadUri, [UriKind]::Absolute)
+        if ($uri.Scheme -ne 'https' -or $uri.UserInfo) { throw 'Roboflow returned an unsupported archive URL.' }
+        $archive = Get-SafeProjectPath -Root $Root -Relative ('logs/downloads/roboflow-' + [Guid]::NewGuid().ToString('N') + '.zip')
+        $partial = $archive + '.partial'
+        $null = New-Item -ItemType Directory -Path (Split-Path -Parent $archive) -Force
+        try {
+            $download = Invoke-RoboflowArchiveRequest -Client $downloadClient -Uri $uri
+            if (-not $download.IsSuccessStatusCode) { throw 'Roboflow archive download failed.' }
+            $input = $download.Content.ReadAsStreamAsync().GetAwaiter().GetResult()
+            $output = [IO.File]::Create($partial)
+            try { $input.CopyTo($output) } finally { $output.Dispose(); $input.Dispose(); $download.Dispose() }
+            Move-Item -LiteralPath $partial -Destination $archive
+            return $archive
+        }
+        catch {
+            if (Test-Path -LiteralPath $partial) { Remove-Item -LiteralPath $partial -Force }
+            throw 'Roboflow archive download failed; check the export link and network, then retry.'
+        }
+    }
+    catch {
+        $message = [string]$_.Exception.Message
+        if ($message -match '^Roboflow ') { throw $message }
+        throw 'Roboflow export failed; check ROBOFLOW_API_KEY, network access, and project permissions, then retry.'
+    }
+    finally { $client.Dispose(); $downloadClient.Dispose() }
 }
 
 function Get-RuntimeAssetState {
@@ -198,7 +311,7 @@ function Write-JsonFile {
 }
 
 function Get-PortableTestFiles {
-    return @('tests/test_bootstrap_launchers.py', 'tests/test_btxrd_inference.py', 'tests/test_btxrd_phase_b.py', 'tests/test_btxrd_upgrades.py', 'tests/test_inference_predictor.py', 'tests/test_streamlit_app.py')
+    return @('tests/test_bootstrap_launchers.py', 'tests/test_dataset_restore.py', 'tests/test_btxrd_inference.py', 'tests/test_btxrd_phase_b.py', 'tests/test_btxrd_upgrades.py', 'tests/test_inference_predictor.py', 'tests/test_streamlit_app.py')
 }
 
 function Get-UvExecutable {
@@ -376,7 +489,7 @@ function Invoke-PythonReadiness {
     $code = @'
 import importlib.metadata as metadata, json, pathlib, sys
 root=pathlib.Path(sys.argv[1]).resolve(); profile=sys.argv[2]; repair=sys.argv[3]=='True'
-report={'python_ok':sys.version_info[:2]==(3,11),'requirements_ok':False,'dataset_valid':False,'model_ready':False,'errors':[]}
+report={'python_ok':sys.version_info[:2]==(3,11),'requirements_ok':False,'dataset_valid':False,'dataset_errors':[],'main_dataset_valid':False,'main_dataset_errors':[],'model_ready':False,'errors':[]}
 try:
  from packaging.requirements import Requirement
  issues=[]
@@ -411,15 +524,29 @@ try:
  try:
   from bone_cancer_ai.data.btxrd_migration import load_btxrd_metadata
   source=root/'dataset/BTXRD'
+  report['dataset_source_exists']=source.is_dir()
   if source.is_dir():
    frame=load_btxrd_metadata(source)
    image_root=source/'images'
    missing=[str(x) for x in frame.image_id if not (image_root/str(x)).is_file()]
    report['dataset_valid']=len(frame)==3746 and not missing
    report['dataset_rows']=len(frame);report['missing_dataset_images']=missing[:20]
+   if not report['dataset_valid']:
+    report['dataset_errors'].append(f'BTXRD dataset is incomplete: {len(frame)} rows and {len(missing)} missing images (expected 3746 rows and no missing images).')
+    report['errors'].extend(report['dataset_errors'])
  except Exception as error:
   message=f'Dataset {type(error).__name__}: {error}'
   report['dataset_errors'].append(message);report['errors'].append(message)
+ report['main_dataset_errors']=[]
+ try:
+  from scripts.dataset_restore import validate_main
+  main_state=validate_main(root/'dataset/Main',root/'configs/main_dataset_manifest.csv',root/'configs/main_dataset_manifest.json')
+  report['main_dataset_valid']=True;report['main_dataset']=main_state
+ except Exception as error:
+  message=f'Main dataset {type(error).__name__}: {error}'
+  report['main_dataset_valid']=False;report['main_dataset_errors'].append(message)
+  if not (root/'dataset/Main').exists():
+   report['main_dataset_errors'].append('Restore the combined Main dataset with -MainDatasetUrl and -MainDatasetSha256 (or BONE_CANCER_MAIN_DATASET_URL and the matching checksum).')
  from bone_cancer_ai.inference.btxrd import BtxrdSubtypePredictor
  from bone_cancer_ai.evaluation.btxrd_review import review_btxrd_run
  from bone_cancer_ai.evaluation.robustness import build_robustness_report
@@ -456,6 +583,7 @@ function Invoke-SetupMain {
     $profile = Get-InstallProfile -Requested $Device -Root $root
     $python = Get-ProjectPython -Root $root
     $report = [ordered]@{ project_root = $root; platform = 'Windows'; profile = $profile; environment_ready = $false; dataset_ready = $false; model_ready = $false; app_ready = $false; errors = @() }
+    $mainState = $null
     try {
         if (-not $CheckOnly) {
             Write-Host "Preparing $root ($profile)"
@@ -469,12 +597,58 @@ function Invoke-SetupMain {
                 Expand-SafeArchive -Archive $archive -Destination $stage -AllowedPrefixes @('BTXRD/')
                 Install-ArchiveTree -Source $stage -Root (Join-Path $root 'dataset') -AllowedPrefixes @('BTXRD/') -PreserveDifferent
             }
-            if ($MainDatasetUrl -and -not (Test-Path -LiteralPath (Join-Path $root 'dataset/Main/train'))) {
-                $archive = Get-SafeProjectPath -Root $root -Relative 'logs/downloads/Main.zip'
-                $null = Save-VerifiedDownload -Url $MainDatasetUrl -Destination $archive -Checksum $MainDatasetSha256
-                $stage = Get-SafeProjectPath -Root $root -Relative ('logs/downloads/main-' + [Guid]::NewGuid().ToString('N'))
-                Expand-SafeArchive -Archive $archive -Destination $stage -AllowedPrefixes @('Main/')
-                Install-ArchiveTree -Source $stage -Root (Join-Path $root 'dataset') -AllowedPrefixes @('Main/') -PreserveDifferent
+            if (-not $SkipDataset) {
+                $mainState = Get-MainDatasetState -Root $root -Python $python
+                if (-not $mainState.present) {
+                    $sourceRoots = @((Join-Path $root 'dataset'))
+                    if ($RoboflowSourceRoot) {
+                        $localSource = [IO.Path]::GetFullPath($RoboflowSourceRoot)
+                        if (-not (Test-Path -LiteralPath $localSource -PathType Container)) { throw 'RoboflowSourceRoot must be an existing source directory.' }
+                        $sourceRoots += $localSource
+                    }
+                    $archive = ''
+                    $archivePrefixes = @('Main/', 'train/', 'valid/', 'val/', 'test/', 'normal/', 'cancer/', 'README.')
+                    if ($MainDatasetUrl) {
+                        if (-not $MainDatasetSha256) { throw 'MainDatasetSha256 is required for the combined Main archive.' }
+                        $archive = Get-SafeProjectPath -Root $root -Relative 'logs/downloads/Main.zip'
+                        try { $null = Save-VerifiedDownload -Url $MainDatasetUrl -Destination $archive -Checksum $MainDatasetSha256 }
+                        catch { throw 'Combined Main archive download or checksum verification failed.' }
+                        $archivePrefixes = @('Main/')
+                    }
+                    elseif ($RoboflowArchivePath) {
+                        $archive = [IO.Path]::GetFullPath($RoboflowArchivePath)
+                        if (-not (Test-Path -LiteralPath $archive -PathType Leaf)) { throw 'RoboflowArchivePath must name an existing ZIP file.' }
+                        if (-not $RoboflowArchiveSha256 -or (Get-AssetHash -LiteralPath $archive).Hash -ne $RoboflowArchiveSha256) { throw 'RoboflowArchivePath requires its matching SHA-256 checksum.' }
+                    }
+                    elseif ($RoboflowArchiveUrl) {
+                        if (-not $RoboflowArchiveSha256) { throw 'RoboflowArchiveSha256 is required for the Roboflow archive URL.' }
+                        $archive = Get-SafeProjectPath -Root $root -Relative 'logs/downloads/Roboflow.zip'
+                        try { $null = Save-VerifiedDownload -Url $RoboflowArchiveUrl -Destination $archive -Checksum $RoboflowArchiveSha256 }
+                        catch { throw 'Roboflow archive download or checksum verification failed.' }
+                    }
+                    elseif ($RoboflowApiKey) {
+                        $archive = Get-RoboflowExportArchive -Root $root -ApiKey $RoboflowApiKey
+                    }
+                    $stage = ''
+                    if ($archive) {
+                        $stage = Get-SafeProjectPath -Root $root -Relative ('logs/downloads/roboflow-stage-' + [Guid]::NewGuid().ToString('N'))
+                    }
+                    try {
+                        if ($stage) {
+                            Expand-SafeArchive -Archive $archive -Destination $stage -AllowedPrefixes $archivePrefixes
+                            $sourceRoots += $stage
+                        }
+                        Restore-MainDataset -Root $root -Python $python -SourceRoots $sourceRoots
+                        $mainState = Get-MainDatasetState -Root $root -Python $python
+                        if (-not $mainState.present) { throw "Main dataset restoration did not validate: $($mainState.error)" }
+                    }
+                    finally {
+                        if ($stage -and (Test-Path -LiteralPath $stage)) {
+                            $safeStage = Get-SafeProjectPath -Root $root -Relative $stage.Substring($root.TrimEnd('\', '/').Length + 1)
+                            Remove-Item -LiteralPath $safeStage -Recurse -Force
+                        }
+                    }
+                }
             }
             $assets = Get-RuntimeAssetState -Root $root
             if (-not $assets.present) {
@@ -485,6 +659,13 @@ function Invoke-SetupMain {
                 Install-RuntimeArchive -Root $root -Url $url -Checksum $digest
             }
         }
+        # Validate Main independently so a later environment/model import failure
+        # cannot leave its readiness fields at their default false values.
+        $mainState = Get-MainDatasetState -Root $root -Python $python
+        $report['main_dataset_valid'] = [bool]$mainState.valid
+        $report['main_dataset_present'] = [bool]$mainState.valid
+        $report['main_dataset_ready'] = [bool]$mainState.valid
+        $report['main_dataset_errors'] = if ($mainState.valid) { @() } else { @($mainState.error) }
         if (-not (Test-Path -LiteralPath $python)) { throw 'Project Python is missing; run setup.ps1 without -CheckOnly.' }
         $details = Invoke-PythonReadiness -Root $root -Python $python -Profile $profile -RepairPaths:(-not $CheckOnly)
         if (-not $CheckOnly -and $Device -eq 'auto' -and $profile -eq 'cuda' -and $details.environment -and (-not $details.environment.cuda.available -or -not $details.environment.tensor_check.finite_gradient)) {
@@ -498,9 +679,13 @@ function Invoke-SetupMain {
         $report.dataset_ready = [bool]$details.dataset_valid
         $report.model_ready = [bool]$details.model_ready
         $report.app_ready = [bool]($report.environment_ready -and $report.model_ready)
-        $report['main_dataset_present'] = Test-Path -LiteralPath (Join-Path $root 'dataset/Main/train')
+        $report['main_dataset_valid'] = [bool]$mainState.valid
+        $report['main_dataset_present'] = [bool]$mainState.valid
+        $report['main_dataset_ready'] = [bool]$mainState.valid
         $report['details'] = $details
         $report.errors = @($details.errors)
+        $report.main_dataset_errors = if ($mainState.valid) { @() } else { @($mainState.error) }
+        if (-not $SkipDataset -and -not $mainState.valid) { $report.errors += @($report.main_dataset_errors) }
         if ($RunTests -and $report.app_ready) {
             Invoke-ProjectCommand -Executable $python -Arguments (@('-m', 'pytest', '-q', '-p', 'no:cacheprovider', '--basetemp=logs/pytest_setup') + (Get-PortableTestFiles)) -Root $root
             $report['portable_tests'] = 'passed'
@@ -519,6 +704,13 @@ function Invoke-SetupMain {
                 $report.model_ready = [bool]$details.model_ready
                 $report['details'] = $details
                 $report.errors += @($details.errors)
+                if ($null -ne $mainState) {
+                    $report.main_dataset_valid = [bool]$mainState.valid
+                    $report.main_dataset_present = [bool]$mainState.valid
+                    $report.main_dataset_ready = [bool]$mainState.valid
+                    $report.main_dataset_errors = if ($mainState.valid) { @() } else { @($mainState.error) }
+                    if (-not $SkipDataset -and -not $mainState.valid) { $report.errors += @($report.main_dataset_errors) }
+                }
             }
             catch { $report.errors += $_.Exception.Message }
         }
@@ -528,7 +720,7 @@ function Invoke-SetupMain {
     Write-Host "Readiness report: $output"
     Write-Host "Environment: $($report.environment_ready); dataset: $($report.dataset_ready); trained model: $($report.model_ready); web app: $($report.app_ready)"
     foreach ($message in $report.errors) { Write-Host $message -ForegroundColor Red }
-    if (-not $report.app_ready -or (-not $SkipDataset -and -not $report.dataset_ready)) { return 1 }
+    if (-not $report.app_ready -or (-not $SkipDataset -and (-not $report.dataset_ready -or -not $report.main_dataset_ready))) { return 1 }
     return 0
 }
 
